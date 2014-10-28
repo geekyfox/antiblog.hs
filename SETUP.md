@@ -72,24 +72,24 @@ and fix all breaks ;-)
 2. Create database
   
  As postgres user:
-``` 
+ ```
 psql
 create role 'antiblog' identified by 'password';
 create database 'antiblog';
 \q
 exit
-```
+ ```
  As yourself, edit `~/.pgpass` file. Add a line
-```
+ ```
 localhost:5432:antiblog:antiblog:password
-```
+ ```
  If you care about security, pick safer password than just 'password'.
  And also configure your firewall to restrict external access to port 5432.
 
 3. Setup nginx
 
  As root create `/etc/nginx/sites-enabled/antiblog` file that contains
-```
+ ```
 server {
     listen 80;
     server_name <Your hostname>;
@@ -102,12 +102,12 @@ server {
         proxy_pass http://localhost:8080;
     }
 }
-```
+ ```
 
  Then restart nginx.
 
 4. Get the source.
-```
+ ```
 cd ~
 git clone https://github.com/geekyfox/antiblog.git
 ```
@@ -115,14 +115,14 @@ git clone https://github.com/geekyfox/antiblog.git
 5. Prepare config files
 
  Server config `~/antiblog/config.json`:
-```json 
+ ```json 
 {
     "url"      : "http://hostname/subdirectory",
     "apiKey"   : "secure_magic_constant",
     "httpPort" : 3000,
     "dbConn"   : "host='localhost' port=5432 user=antiblog dbname='antiblog' password='password'"
 }
-```
+ ```
 
  `url` is your antiblog's root URL. `apiKey` is an arbitrary string
  (`./scripts/make_api_key.py` can make one for you). `httpPort` is the
@@ -130,13 +130,13 @@ git clone https://github.com/geekyfox/antiblog.git
  the password that you've set when created the role.
 
  Client config `~/antiblog/config-dev.json`:
-```json
+ ```json
 {
     "name"     : "dev",
     "url"      : "http://hostname/subdirectory",
     "apiKey"   : "secure_magic_constant"
 }
-```
+ ```
  `url` and `apiKey` are same as in server config.
 
 6. Blame me for not automating the tasks above. Then thank me for not asking
@@ -146,11 +146,11 @@ you to run some ad-hoc scripts as root on your system.
 silly.
 
 8. Finally, build and run.
-```
+ ```
 cd antiblog
 cabal sandbox init
 make install
-```
+ ```
 
 9. Open the website in the browser and check that it really displays an
 empty antiblog.
@@ -158,12 +158,12 @@ empty antiblog.
 10. Test the posting.
 
  Create sample.txt file with contents:
-```
+ ```
 ## antiblog publish
 ## antiblog title My first post
 ## antiblog tags test
 Hello, this is my first antiblog post.
-```
+ ```
 
  and upload it via `antisync sync sample.txt`
 
