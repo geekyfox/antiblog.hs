@@ -19,6 +19,7 @@ class TaggedString w where
     expose :: w -> String
     -- | Wraps string content
     wrap   :: String -> w
+    -- | Adapter between custom `TaggedString` and common `IsString`.
     shapeshift :: (IsString a) => w -> a
     shapeshift = fromString . expose
 
@@ -49,6 +50,9 @@ instance Monad Processed where
 
 instance Functor Processed where
     fmap = liftM
+
+instance (Show a) => Show (Processed a) where
+    show = describe show
 
 -- | Shorthand type.
 type MProc m a = m (Processed a)

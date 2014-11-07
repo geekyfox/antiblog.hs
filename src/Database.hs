@@ -73,6 +73,7 @@ instance FromRow (PagedEntry) where
         kind     <- field
         title    <- field
         content  <- field
+        summary  <- field
         more     <- field
         symlink  <- field
         metalink <- field
@@ -84,7 +85,7 @@ instance FromRow (PagedEntry) where
                 body     = content,
                 symlink  = symlink,
                 metalink = metalink,
-                summary  = (),
+                summary  = summary,
                 md5sig   = (),
                 tags     = fromMaybe (Tags []) tags
             },
@@ -95,7 +96,7 @@ instance FromRow (PagedEntry) where
 -- | Retrieves a list of entries to show at particular URL.
 fetchEntries :: PoolT -> String -> IO [PagedEntry]
 fetchEntries p href = fetch p (Only href)
-    "SELECT entry_id, kind, title, content, \
+    "SELECT entry_id, kind, title, content, teaser,\
     \read_more, symlink, metalink, \"tags\" \
     \FROM page_display WHERE href = ? ORDER BY page_index"
         
@@ -106,8 +107,8 @@ fetchPage p href = liftM2 mix entries extra
         entries = fetchEntries p href
         extra   = fetch p (Only href)
             "SELECT previous, next FROM previous_next WHERE href = ?"
-        mix as ((a,b):_) = Page as a b
-        mix as []        = Page as Nothing Nothing
+        mix as ((a,b):_) = Page as href a b
+        mix as []        = Page as href Nothing Nothing
 
 -- | Retrieves a single entry at particular URL or 'Nothing' if
 --   no matching entry found.

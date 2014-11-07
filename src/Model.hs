@@ -84,9 +84,9 @@ type EntryUP = EntryRQ Int
 
 -- | Entry as loaded from database for rendering.
 --   `uid` and `title` are always present and loaded. 
---   `summary` is never present (either teaser or body is fetched,
---   never both). `md5sig` is never fetched for rendering.
-type EntryDB = Entry Int () Title ()
+--   `summary` is always present. `md5sig` is never fetched
+--   for rendering.
+type EntryDB = Entry Int Summary Title ()
 
 -- | Type of rendered webpage. Currently only used to render correct
 --   hyperlinks on \/meta\/ pages.
@@ -108,6 +108,8 @@ data PagedEntry = PagedEntry {
 --   entries.
 data Page = Page {
       entries  :: [PagedEntry]
+    -- | Link to page itself.
+    , own      :: !String
     -- | Link to the previous page (if any).
     , previous :: Maybe String
     -- | Link to the next page (if any).    

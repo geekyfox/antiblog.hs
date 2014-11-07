@@ -106,6 +106,7 @@ SELECT
          THEN e.teaser
          ELSE e.body
     END AS content,
+    e.teaser AS teaser,
     CASE WHEN p.kind = 'list' OR p.kind = 'list.meta'
          THEN e.read_more
          ELSE FALSE

@@ -28,7 +28,60 @@ import Config
 import qualified Model as M
 import Utils
 
-type HrefFun = String -> Attribute
+-- | Whether or not to add RSS link to page's header
+type LinkRSS = Bool
+
+-- | Data for rendering \<head\> section
+data Header = Header {
+    -- | Whether or not to add RSS link
+    headerRSS     :: LinkRSS
+    -- | Title (for \<title\> and for OpenGraph section)
+   ,headerTitle   :: M.Title
+    -- | URL of the page (for OpenGraph section)
+   ,headerURL     :: String
+    -- | Summary (for OpenGraph section)
+   ,headerSummary :: M.Summary
+}
+
+-- | Strips tags from HTML text
+stripTags :: String -> String
+stripTags []         = []
+stripTags ('<' : xs) = stripTags $ drop 1 $ dropWhile (/= '>') xs
+stripTags (x : xs)   = x : stripTags xs
+
+-- | Removes HTML formatting from a `TaggedString`
+unformat :: (TaggedString a) => a -> a
+unformat = wrap . stripTags . expose
+
+-- | Header for page with single entry
+entryHeader :: BaseURL -> M.PagedEntry -> Header
+entryHeader base paged@M.PagedEntry{ M.entry = e } = Header {
+     headerRSS     = False
+    ,headerTitle   = wrap $ "The Antiblog: " ++ displayTitle e
+    ,headerURL     = permalink base paged
+    ,headerSummary = unformat $ M.summary e
+}
+
+-- | Header for page with multiple entries
+pageHeader :: BaseURL -> M.Page -> Header
+pageHeader base M.Page{ M.own = ownUrl } = Header {
+     headerRSS     = True
+    ,headerTitle   = wrap "The Antiblog"
+    ,headerURL     = fromString $ urlConcat base ownUrl
+    ,headerSummary = wrap "The Antiblog by Ivan Appel"
+}
+
+-- | Renders OpenGraph section of \<head\>
+opengraph :: Header -> Html
+opengraph header =
+    do
+        item "og:type"        "website"
+        item "og:title"       (shapeshift $ headerTitle header)
+        item "og:url"         (fromString $ headerURL header)
+        item "og:description" (shapeshift $ headerSummary header)
+    where
+        item p v = meta ! property p ! content v
+        property = customAttribute "property"
 
 -- | Display title of the entry (either title or #\$id)
 displayTitle :: (IsString a) => M.EntryDB -> a
@@ -37,77 +90,79 @@ displayTitle e = fromString $ fmt $ expose $ M.title e
           fmt st = st
 
 -- | Permanent link of the entry.
-permalink :: M.PagedEntry -> String
-permalink M.PagedEntry{ M.entry = e, M.pageKind = pk } =
-    fromMaybe ("entry/" ++ show (M.uid e))
-    $ listToMaybe
-    $ catMaybes
-    $ prio pk
-      where
-          prio M.Normal = [sym, met]
-          prio M.Meta   = [met, sym]
-          sym = M.symlink e  |>> expose
-          met = M.metalink e |>> expose
-
--- | Indicates whether or not to include an RSS link in HTML head.
-type LinkRSS = Bool
+permalink :: (IsString a) => BaseURL -> M.PagedEntry -> a
+permalink base paged = fromString $ urlConcat base preferred
+    where
+        preferred = fromMaybe standard optional
+        standard  = "entry/" ++ show (M.uid entry)
+        entry     = M.entry paged
+        optional  = listToMaybe $ catMaybes priority
+        priority  = case M.pageKind paged of
+                         M.Normal -> [symlink, metalink]
+                         M.Meta   -> [metalink, symlink]
+        symlink   = M.symlink entry  |>> expose
+        metalink  = M.metalink entry |>> expose
 
 -- | Produces \<head/> part of HTML document.
-htmlHead :: HrefFun -> LinkRSS -> M.Title -> Html
-htmlHead mkref showRss title = 
+htmlHead :: BaseURL -> Header -> Html
+htmlHead base header = 
     H.head $ do
         mapM_ cssLink
             [ fontref "Crimson Text:400,400italic,700"
             , fontref "Raleway"
             , fontref "Molengo"
             , fontref "Cutive+Mono"
-            , mkref "static/antiblog.css"
+            , mkref base "static/antiblog.css"
             ]
-        when showRss $
-            link ! mkref "rss.xml"
+        when (headerRSS header) $
+            link ! mkref base "rss.xml"
                  ! rel "alternate"
                  ! type_ "application/rss+xml"
                  ! A.title "RSS"
-        H.title (shapeshift title)
+        H.title (shapeshift $ headerTitle header)
+        opengraph header
     where
         cssLink ref =
             link ! ref ! rel "stylesheet" ! type_ "text/css"
-        fontref n = href $ fromString $
-            "http://fonts.googleapis.com/css?family=" ++ n
+        fontref n =
+            href $ fromString
+                 $ "http://fonts.googleapis.com/css?family=" ++ n
 
 -- | Produces the \"stamp\" block for top-right corner of the page.
-layoutStamp :: HrefFun -> Html
-layoutStamp mkref =
+layoutStamp :: BaseURL -> Html
+layoutStamp base =
     H.div ! class_ "page-header" $ do
-        a ! mkref "" $ "The Antiblog"
+        a ! mkref base "" $ "The Antiblog"
         H.div ! class_ "page-subheader" $ do
             "by "
             a ! href "http://www.geekyfox.net" $ "Ivan Appel"
             hr
             H.div ! class_ "page-subheader" $ do
-                a ! mkref "meta/about" $ "About" ; " | "
-                a ! mkref "rss.xml" $ "RSS" ; " | "
-                a ! mkref "entry/random" $ "Random"
+                a ! mkref base "meta/about" $ "About"
+                " | "
+                a ! mkref base "rss.xml" $ "RSS"
+                " | "
+                a ! mkref base "entry/random" $ "Random"
 
 -- | Attaches the common header to content.
-layoutCommon :: HrefFun -> LinkRSS -> M.Title -> Html -> Html
-layoutCommon mkref showRss title content =
+layoutCommon :: BaseURL -> Header -> Html -> Html
+layoutCommon base header content =
     html $ do
-        htmlHead mkref showRss title
+        htmlHead base header
         body $
             H.div ! class_ "toplevel" $ do
-                layoutStamp mkref
+                layoutStamp base
                 content
 
 -- | Produces a barebone block of HTML with an entry.
-layoutEntryBarebone :: HrefFun -> M.PagedEntry -> Html
-layoutEntryBarebone mkref paged =
+layoutEntryBarebone :: BaseURL -> M.PagedEntry -> Html
+layoutEntryBarebone base paged =
     H.div ! class_ entryClass $ do
         H.div ! class_ "header colored" $ self (displayTitle e)
         H.div ! class_ bodyClass $
             H.div ! class_ "stuff" $ do
                 preEscapedText (shapeshift $ M.body e)
-                when (M.readMore paged) $ readMore
+                when (M.readMore paged) readMore
         unless tagless $
             H.div ! class_ "footer" $
                 mapM_ taglink ts    
@@ -119,41 +174,38 @@ layoutEntryBarebone mkref paged =
         modulo      = (M.uid e `mod` 6) + 1        
         entryClass  = fromString $ "entry color_" ++ show modulo
         bodyClass   = if tagless then "body tagless" else "body"
-        self t      = a ! mkref (permalink paged) $ t
+        self t      = a ! href (permalink base paged) $ t
         readMore    = do "[" ; self "read more" ; "]"
-        taglink t   = a ! class_ "colored"
-                        ! mkref ("/page/" ++ t ++ "/1")
-                        $ fromString t
+        taglink t   = do
+                        preEscapedText "&nbsp;"
+                        a ! mkref base ("/page/" ++ t ++ "/1")
+                          ! class_ "colored"
+                          $ fromString t
 
 -- | Produces a complete page with single entry.
-layoutEntry :: HrefFun -> M.PagedEntry -> Html
-layoutEntry mkref paged = layoutCommon mkref False title inner
+layoutEntry :: BaseURL -> M.PagedEntry -> Html
+layoutEntry base paged = layoutCommon base header inner
     where
-        title = wrap $
-            "The Antiblog: " ++ displayTitle (M.entry paged)
-        inner = layoutEntryBarebone mkref paged
+        inner  = layoutEntryBarebone base paged
+        header = entryHeader base paged
 
 -- | Produces a complete page with multiple entries
-layoutPage :: HrefFun -> M.Page -> Html
-layoutPage mkref page = layoutCommon mkref True title inner
+layoutPage :: BaseURL -> M.Page -> Html
+layoutPage base page = layoutCommon base header inner
     where
-        title = wrap "The Antiblog"
+        header = pageHeader base page
+        navi f css txt =
+            case f page of
+                 Nothing -> return ()
+                 Just h  -> H.div ! class_ css $ a ! mkref base h $ txt
         inner = do
-            mapM_ (layoutEntryBarebone mkref) $ M.entries page
+            mapM_ (layoutEntryBarebone base) $ M.entries page
             H.div ! class_ "navi-container" $ do
-                case M.previous page of
-                     Nothing -> return ()
-                     Just h ->
-                         H.div ! class_ "navi previous" $
-                             a ! mkref h $ "Previous page"
-                case M.next page of
-                     Nothing -> return ()
-                     Just h ->
-                         H.div ! class_ "navi next" $
-                         a ! mkref h $ "Next page"
+                navi M.previous "navi previous" "Previous page"
+                navi M.next     "navi next"     "Next page"  
 
 -- | Produces a `HrefFun` that prepends `BaseURL` 
-mkref :: BaseURL -> HrefFun
+mkref :: BaseURL -> String -> Attribute
 mkref base = href . fromString . urlConcat base
 
 -- | Concatenates the urls.
@@ -182,7 +234,7 @@ renderFeed base items = showXML $ rssToXML feed
 
 
 renderEntry :: BaseURL -> M.PagedEntry -> Text
-renderEntry base = renderHtml . layoutEntry (mkref base)
+renderEntry base = renderHtml . layoutEntry base
 
 renderPage :: BaseURL -> M.Page -> Text
-renderPage base = renderHtml . layoutPage (mkref base)
+renderPage base = renderHtml . layoutPage base
