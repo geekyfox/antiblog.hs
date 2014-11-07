@@ -132,6 +132,7 @@ data ParserState =
     --
     --   The only legal next state is `Body`.
     | Code
+    | Poem
     deriving Eq
 
 -- | Accumulator for parsed data.
@@ -214,6 +215,12 @@ append p s =
          Body -> p {
              body = "\n" : s : body p
          }
+         Poem | null $ strip s -> p {
+             body = "\n" : "</div><div class=\"stuff\">" : body p
+         }
+         Poem -> p {
+             body = "\n" : "<br />" : s : body p
+         }
          Summary -> p {
              summary = Just $ wrap
                             $ maybe s (\x -> expose x ++ "\n" ++ s)
@@ -225,6 +232,7 @@ append p s =
          Code -> p {
              body = "\n" : s : body p
          }
+
 
 -- | Inserts `summary` into `body`.
 insertSummary :: Parser -> Processed Parser
@@ -308,6 +316,8 @@ parseLine p line =
             insertSummary p
         impl ["code"] =
             startCode p
+        impl ["poem"] =
+            OK p { state = Poem }
         impl _ = Fail $ "Unknown directive: " ++ line
     in case words line of
          ("##":"antiblog":rest) -> impl rest
