@@ -45,7 +45,7 @@ query req = withManager defaultManagerSettings protect |>> decodeData
     where
         protect mgr  = work mgr `catch` handleError
         work mgr     = withResponse req mgr handleResult
-        handleResult = liftM OK . responseBody
+        handleResult = liftM OK . brConsume . responseBody
         handleError  = return . Fail . fmtHttpError
 
 -- | Prepares a request for querying specific API method.

@@ -18,11 +18,13 @@ data EntryHash = EHash {
   , hash    :: String
 }
 
+data ApiMessage a = AM a
+
 -- | Response type of `create` method.
-type ReplyCR = Int
+type ReplyCR = ApiMessage Int
 
 -- | Response type of `update` method.
-type ReplyUP = ()
+type ReplyUP = ApiMessage ()
 
 instance FromJSON EntryHash where
     parseJSON (Object v) = do
@@ -34,11 +36,22 @@ instance FromJSON EntryHash where
 instance ToJSON EntryHash where
     toJSON (EHash uid sig) = object ["id" .= uid, "signature" .= sig]
 
+instance (FromJSON x) => FromJSON (ApiMessage x) where
+    parseJSON (Object v) = do
+        content <- v .: "content"
+        return $ AM content
+    parseJSON _ = mzero
+
+instance (ToJSON x) => ToJSON (ApiMessage x) where
+    toJSON (AM x) = object ["content" .= toJSON x]
+
 -- | Parses JSON document wrapping parse errors as `Fail`.
-decodeData :: (FromJSON a) => Processed ByteString -> Processed a
-decodeData procBytes = do
-    bytes <- procBytes
-    case eitherDecode $ fromChunks [bytes] of
-         Left errmsg -> Fail $ "Invalid JSON: " ++ errmsg
+decodeData :: (FromJSON a) => Processed [ByteString] -> Processed a
+decodeData procFragments = do
+    fragments <- procFragments
+    case eitherDecode $ fromChunks fragments of
+         Left errmsg -> Fail $ show ("Invalid JSON: " ++ errmsg
+                                    ,fragments
+                                    )
          Right value -> OK value
 

@@ -21,6 +21,7 @@ import System.IO.Strict(hGetContents)
 import System.IO.UTF8(hPutStr)
 import System.Posix (fileSize, getFileStatus)
 
+import Api
 import ApiClient
 import Config
 import Model(EntryFS, uid, md5sig)
@@ -139,10 +140,12 @@ syncOne sys srv fp = loaded >>= liftProc work |>> join
     where
         approve pe = pe >>= (\e -> decideStatus srv e >> return e)
         loaded     = loadFile (systemName sys) fp |>> approve
-        create e   = createEntry sys e >>= liftProc (injectId sys fp)
+        create e   = createEntry sys e |>> unfold
+                                       >>= liftProc (injectId sys fp)
         work e
-          | isJust $ uid e = updateEntry sys e
+          | isJust $ uid e = updateEntry sys e |>> unfold
           | otherwise      = create e
+        unfold = fmap (\(AM x) -> x)
 
 -- | Syncronizes a list of files. Reports progress at given
 --   `Verbosity`.

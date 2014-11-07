@@ -171,7 +171,7 @@ updateEntry p e = withResource p (\conn -> do
           "SELECT update_entry(?, ?, ?, ?, ?)"
           (uid e, title e, body e, summary e, md5sig e) :: IO DBVoid
     recordOptionalData conn e (uid e)
-    return ())
+    return $ AM ())
 
 -- | Creates a new entry and returns an assigned ID.
 createEntry :: PoolT -> EntryCR -> IO ReplyCR
@@ -182,4 +182,4 @@ createEntry p e = withResource p (\conn -> do
     let uid = case rs of
                    [Only x] -> x
                    _ -> error $ "Weird result set: " ++ show rs
-    return uid)
+    return $ AM uid)
