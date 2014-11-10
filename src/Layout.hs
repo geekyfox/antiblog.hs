@@ -15,33 +15,69 @@ import Control.Monad(when, unless)
 import Data.String(IsString,fromString)
 import Data.Maybe(fromMaybe,listToMaybe,catMaybes,fromJust)
 import Data.Text.Lazy(Text)
-import Text.Blaze.Html4.Strict
+import Text.Blaze.Html4.Strict hiding (title)
 import qualified Text.Blaze.Html4.Strict as H
-import Text.Blaze.Html4.Strict.Attributes
+import Text.Blaze.Html4.Strict.Attributes hiding 
+    (title
+    ,value
+    ,summary
+    )
 import qualified Text.Blaze.Html4.Strict.Attributes as A
 import Text.Blaze.Html.Renderer.Text
 import Text.Blaze.Internal(preEscapedText)
 import Text.RSS
 import Network.URI(parseURI)
 
-import Config
+import Config(BaseURL)
 import qualified Model as M
 import Utils
 
--- | Whether or not to add RSS link to page's header
-type LinkRSS = Bool
-
--- | Data for rendering \<head\> section
-data Header = Header {
+data Augmented a = AUG {
+     value :: a
+    ,baseUrl :: BaseURL
     -- | Whether or not to add RSS link
-    headerRSS     :: LinkRSS
+    ,hasRssLink :: Bool
     -- | Title (for \<title\> and for OpenGraph section)
-   ,headerTitle   :: M.Title
+    ,title   :: M.Title
     -- | URL of the page (for OpenGraph section)
-   ,headerURL     :: String
+    ,ownUrl     :: String
     -- | Summary (for OpenGraph section)
-   ,headerSummary :: M.Summary
+    ,summary :: M.Summary
+    ,tags :: [M.TagUsage]
 }
+
+class Entity a where
+    entityHasRss  :: a -> Bool
+    entityTitle   :: a -> M.Title
+    entityUrl     :: BaseURL -> a -> String
+    entitySummary :: a -> M.Summary
+
+comprise :: (Entity a) => BaseURL -> [M.TagUsage] -> a -> Augmented a
+comprise base tags x = AUG
+    {value   = x
+    ,baseUrl = base
+    ,hasRssLink = entityHasRss x
+    ,title   = entityTitle x
+    ,ownUrl  = entityUrl base x
+    ,summary = unformat $ entitySummary x
+    ,tags    = tags
+    }
+
+instance Entity M.Page where
+    entityHasRss _ = True
+    entityTitle _   = wrap "The Antiblog"
+    entityUrl b  = fromString . urlConcat b . M.own
+    entitySummary _ = wrap "The Antiblog by Ivan Appel"
+
+instance Entity M.PagedEntry where
+    entityHasRss _ = False
+    entityTitle  = wrap . (++) "The Antiblog: " . displayTitle . M.entry
+    entityUrl = permalink
+    entitySummary   = M.summary . M.entry
+    
+-- | Produces a `HrefFun` that prepends `BaseURL` 
+mkref :: Augmented a -> String -> Attribute
+mkref w = href . fromString . urlConcat (baseUrl w)
 
 -- | Strips tags from HTML text
 stripTags :: String -> String
@@ -53,32 +89,14 @@ stripTags (x : xs)   = x : stripTags xs
 unformat :: (TaggedString a) => a -> a
 unformat = wrap . stripTags . expose
 
--- | Header for page with single entry
-entryHeader :: BaseURL -> M.PagedEntry -> Header
-entryHeader base paged@M.PagedEntry{ M.entry = e } = Header {
-     headerRSS     = False
-    ,headerTitle   = wrap $ "The Antiblog: " ++ displayTitle e
-    ,headerURL     = permalink base paged
-    ,headerSummary = unformat $ M.summary e
-}
-
--- | Header for page with multiple entries
-pageHeader :: BaseURL -> M.Page -> Header
-pageHeader base M.Page{ M.own = ownUrl } = Header {
-     headerRSS     = True
-    ,headerTitle   = wrap "The Antiblog"
-    ,headerURL     = fromString $ urlConcat base ownUrl
-    ,headerSummary = wrap "The Antiblog by Ivan Appel"
-}
-
 -- | Renders OpenGraph section of \<head\>
-opengraph :: Header -> Html
-opengraph header =
+opengraph :: Augmented a -> Html
+opengraph w =
     do
         item "og:type"        "website"
-        item "og:title"       (shapeshift $ headerTitle header)
-        item "og:url"         (fromString $ headerURL header)
-        item "og:description" (shapeshift $ headerSummary header)
+        item "og:title"       (shapeshift $ title w)
+        item "og:url"         (fromString $ ownUrl w)
+        item "og:description" (shapeshift $ summary w)
     where
         item p v = meta ! property p ! content v
         property = customAttribute "property"
@@ -103,24 +121,24 @@ permalink base paged = fromString $ urlConcat base preferred
         symlink   = M.symlink entry  |>> expose
         metalink  = M.metalink entry |>> expose
 
--- | Produces \<head/> part of HTML document.
-htmlHead :: BaseURL -> Header -> Html
-htmlHead base header = 
+-- | Produces /<head/> part of HTML document.
+htmlHead :: Augmented a -> Html
+htmlHead w = 
     H.head $ do
         mapM_ cssLink
             [ fontref "Crimson Text:400,400italic,700"
             , fontref "Raleway"
             , fontref "Molengo"
             , fontref "Cutive+Mono"
-            , mkref base "static/antiblog.css"
+            , mkref w "static/antiblog.css"
             ]
-        when (headerRSS header) $
-            link ! mkref base "rss.xml"
+        when (hasRssLink w) $
+            link ! mkref w "rss.xml"
                  ! rel "alternate"
                  ! type_ "application/rss+xml"
                  ! A.title "RSS"
-        H.title (shapeshift $ headerTitle header)
-        opengraph header
+        H.title (shapeshift $ title w)
+        opengraph w
     where
         cssLink ref =
             link ! ref ! rel "stylesheet" ! type_ "text/css"
@@ -129,34 +147,45 @@ htmlHead base header =
                  $ "http://fonts.googleapis.com/css?family=" ++ n
 
 -- | Produces the \"stamp\" block for top-right corner of the page.
-layoutStamp :: BaseURL -> Html
-layoutStamp base =
+layoutStamp :: Augmented a -> Html
+layoutStamp w@AUG{baseUrl = base} =
     H.div ! class_ "page-header" $ do
-        a ! mkref base "" $ "The Antiblog"
+        a ! mkref w "" $ "The Antiblog"
         H.div ! class_ "page-subheader" $ do
             "by "
             a ! href "http://www.geekyfox.net" $ "Ivan Appel"
             hr
             H.div ! class_ "page-subheader" $ do
-                a ! mkref base "meta/about" $ "About"
+                a ! mkref w "meta/about" $ "About"
                 " | "
-                a ! mkref base "rss.xml" $ "RSS"
+                a ! mkref w "rss.xml" $ "RSS"
                 " | "
-                a ! mkref base "entry/random" $ "Random"
+                a ! mkref w "entry/random" $ "Random"
+                
+layoutTagCloud :: Augmented a -> Html
+layoutTagCloud w = (H.div ! class_ "tag-cloud") $ mapM_ one $ tags w
+    where
+        one (M.TagUsage tag count) = 
+            H.div ! class_ (fromString $ classify count) $
+                H.div ! class_ "colored" $
+                    a ! mkref w ("/page/" ++ tag ++ "/1")
+                      $ fromString tag
+        classify x = "color_" ++ show ((x `mod` 6) + 1)
 
 -- | Attaches the common header to content.
-layoutCommon :: BaseURL -> Header -> Html -> Html
-layoutCommon base header content =
+layoutCommon :: Augmented a -> Html -> Html
+layoutCommon w content =
     html $ do
-        htmlHead base header
+        htmlHead w
         body $
             H.div ! class_ "toplevel" $ do
-                layoutStamp base
+                layoutStamp w
+                layoutTagCloud w
                 content
 
 -- | Produces a barebone block of HTML with an entry.
-layoutEntryBarebone :: BaseURL -> M.PagedEntry -> Html
-layoutEntryBarebone base paged =
+layoutEntryBarebone :: Augmented a -> M.PagedEntry -> Html
+layoutEntryBarebone w@AUG{baseUrl = base} paged =
     H.div ! class_ entryClass $ do
         H.div ! class_ "header colored" $ self (displayTitle e)
         H.div ! class_ bodyClass $
@@ -178,35 +207,29 @@ layoutEntryBarebone base paged =
         readMore    = do "[" ; self "read more" ; "]"
         taglink t   = do
                         preEscapedText "&nbsp;"
-                        a ! mkref base ("/page/" ++ t ++ "/1")
+                        a ! mkref w ("/page/" ++ t ++ "/1")
                           ! class_ "colored"
                           $ fromString t
 
 -- | Produces a complete page with single entry.
-layoutEntry :: BaseURL -> M.PagedEntry -> Html
-layoutEntry base paged = layoutCommon base header inner
+layoutEntry :: Augmented M.PagedEntry -> Html
+layoutEntry w@AUG{value = paged} = layoutCommon w inner
     where
-        inner  = layoutEntryBarebone base paged
-        header = entryHeader base paged
+        inner  = layoutEntryBarebone w paged
 
 -- | Produces a complete page with multiple entries
-layoutPage :: BaseURL -> M.Page -> Html
-layoutPage base page = layoutCommon base header inner
+layoutPage :: Augmented M.Page -> Html
+layoutPage w@AUG{value = page} = layoutCommon w inner
     where
-        header = pageHeader base page
         navi f css txt =
             case f page of
                  Nothing -> return ()
-                 Just h  -> H.div ! class_ css $ a ! mkref base h $ txt
+                 Just h  -> H.div ! class_ css $ a ! mkref w h $ txt
         inner = do
-            mapM_ (layoutEntryBarebone base) $ M.entries page
+            mapM_ (layoutEntryBarebone w) $ M.entries page
             H.div ! class_ "navi-container" $ do
                 navi M.previous "navi previous" "Previous page"
                 navi M.next     "navi next"     "Next page"  
-
--- | Produces a `HrefFun` that prepends `BaseURL` 
-mkref :: BaseURL -> String -> Attribute
-mkref base = href . fromString . urlConcat base
 
 -- | Concatenates the urls.
 urlConcat :: BaseURL -> String -> String
@@ -233,8 +256,8 @@ renderFeed base items = showXML $ rssToXML feed
         convertTitle ti = [Title ti]
 
 
-renderEntry :: BaseURL -> M.PagedEntry -> Text
-renderEntry base = renderHtml . layoutEntry base
+renderEntry :: Augmented M.PagedEntry -> Text
+renderEntry = renderHtml . layoutEntry
 
-renderPage :: BaseURL -> M.Page -> Text
-renderPage base = renderHtml . layoutPage base
+renderPage :: Augmented M.Page -> Text
+renderPage = renderHtml . layoutPage

@@ -125,3 +125,8 @@ data RssEntry = Rss {
     posted :: UTCTime,
     rlink  :: String
 }
+
+data TagUsage = TagUsage {
+     tuTag   :: String
+    ,tuCount :: Int
+}

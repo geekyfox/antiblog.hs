@@ -4,7 +4,7 @@
 -- | Entrypoint module of `antiblog` executable.
 module Main(main) where
 
-import Control.Monad(liftM)
+import Control.Monad(liftM,liftM2)
 import Control.Monad.IO.Class(liftIO)
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Data.Text.Lazy as T
@@ -13,21 +13,29 @@ import Web.Scotty
 
 import Database
 import Config
-import Layout
+import Layout hiding (baseUrl,tags,title,summary)
 import Model
 import Utils
 
 -- | Provides an entry page at given URL.
 getEntry :: PoolT -> BaseURL -> String -> IO T.Text
-getEntry db baseUrl href = liftM render $ fetchEntry db href
+getEntry db baseUrl href = entry >>= maybe notFound render
     where
-        notFound = T.pack $ "NOT FOUND: " ++ href
-        render   = maybe notFound (renderEntry baseUrl)
+        entry    = fetchEntry db href
+        tags     = fetchTagCloud db
+        notFound = return $ T.pack $ "NOT FOUND: " ++ href
+        render e = tags |>> combine |>> renderEntry
+            where
+                combine ts = comprise baseUrl ts e
 
 -- | Provides a list page at given URL.
 getPage :: PoolT -> BaseURL -> String -> IO T.Text
-getPage db baseUrl = liftM (renderPage baseUrl) . fetchPage db
-
+getPage db baseUrl href = augm |>> renderPage
+    where
+        page = fetchPage db href
+        tags = fetchTagCloud db
+        augm = liftM2 (comprise baseUrl) tags page
+        
 -- | Provides an RSS feed.
 getFeed :: PoolT -> BaseURL -> IO String
 getFeed db baseUrl = liftM (renderFeed baseUrl) $ fetchFeed db

@@ -184,3 +184,14 @@ createEntry p e = withResource p (\conn -> do
                    [Only x] -> x
                    _ -> error $ "Weird result set: " ++ show rs
     return $ AM uid)
+
+instance FromRow TagUsage where
+    fromRow = TagUsage <$> field <*> field
+
+-- | Retrieves the list of entries in RSS feed.
+fetchTagCloud :: PoolT -> IO [TagUsage]
+fetchTagCloud p = fetchSimple p
+    "SELECT tag, count(1)::integer AS counter \
+    \FROM effective_entry_tag                 \
+    \GROUP BY tag                             \
+    \ORDER BY counter DESC"
