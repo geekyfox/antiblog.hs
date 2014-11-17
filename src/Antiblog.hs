@@ -23,7 +23,7 @@ getEntry db baseUrl href = entry >>= maybe notFound render
     where
         entry    = fetchEntry db href
         tags     = fetchTagCloud db
-        notFound = return $ T.pack $ "NOT FOUND: " ++ href
+        notFound = getNotFound db baseUrl
         render e = tags |>> combine |>> renderEntry
             where
                 combine ts = comprise baseUrl ts e
@@ -46,6 +46,12 @@ getRandom db baseUrl ref = link |>> urlConcat baseUrl |>> T.pack
     where link = case ref of
             Just r  -> fetchRandomExcept db r
             Nothing -> fetchRandom db
+
+getNotFound :: PoolT -> BaseURL -> IO T.Text
+getNotFound db baseUrl = augm |>> renderNotFound
+    where
+        tags = fetchTagCloud db
+        augm = liftM (\ts -> comprise baseUrl ts ()) tags
 
 mparam :: (Parsable a) => T.Text -> ActionM (Maybe a)
 mparam key = fmap Just (param key) `rescue` (\_ -> return Nothing)
@@ -132,7 +138,7 @@ webloop db sys =
             json result
         notFound $ do
             status notFound404
-            html "<h1>This is not the page you are looking for</h1>"            
+            invoke_ getNotFound >>= html
 
 -- | Entrypoint.
 main :: IO ()

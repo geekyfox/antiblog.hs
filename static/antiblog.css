@@ -92,6 +92,12 @@ div.entry div.tagless {
     padding-bottom: 16px;
 }
 
+div.entry div.headless {
+    border-radius: 25px 25px 25px 25px;
+    padding-bottom: 16px;
+    font-family: 'Raleway', sans-serif;
+}
+
 div.entry div.footer {
     padding-top: 8px;
     padding-right: 32px;

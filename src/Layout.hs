@@ -74,7 +74,13 @@ instance Entity M.PagedEntry where
     entityTitle  = wrap . (++) "The Antiblog: " . displayTitle . M.entry
     entityUrl = permalink
     entitySummary   = M.summary . M.entry
-    
+
+instance Entity () where
+    entityHasRss _ = False
+    entityTitle _ = wrap "The Antiblog"
+    entityUrl b _ = expose b
+    entitySummary _ = wrap "The Antiblog by Ivan Appel"
+
 -- | Produces a `HrefFun` that prepends `BaseURL` 
 mkref :: Augmented a -> String -> Attribute
 mkref w = href . fromString . urlConcat (baseUrl w)
@@ -231,6 +237,14 @@ layoutPage w@AUG{value = page} = layoutCommon w inner
                 navi M.previous "navi previous" "Previous page"
                 navi M.next     "navi next"     "Next page"  
 
+layoutNotFound :: Augmented () -> Html
+layoutNotFound w = layoutCommon w inner
+    where
+        inner =
+            H.div ! class_ "entry" $
+                H.div ! class_ "body headless" $
+                    "Can't find the page you've been looking for"
+
 -- | Concatenates the urls.
 urlConcat :: BaseURL -> String -> String
 urlConcat base ('/':xs) = expose base ++ xs
@@ -261,3 +275,7 @@ renderEntry = renderHtml . layoutEntry
 
 renderPage :: Augmented M.Page -> Text
 renderPage = renderHtml . layoutPage
+
+renderNotFound :: Augmented () -> Text
+renderNotFound = renderHtml . layoutNotFound
+
