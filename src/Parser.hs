@@ -135,6 +135,10 @@ data ParserState =
     | Poem
     deriving Eq
 
+data BodyLine = Raw String
+              | Newline
+              | Separator
+
 -- | Accumulator for parsed data.
 data Parser = P {
       state     :: ParserState
@@ -143,7 +147,7 @@ data Parser = P {
     , title     :: Maybe M.Title
     , summary   :: Maybe M.Summary
     , uid       :: Maybe Int
-    , body      :: [String]
+    , body      :: [BodyLine]
     , footnotes :: [String]
     , symlink   :: Maybe M.Symlink
     , metalink  :: Maybe M.Metalink
@@ -166,11 +170,23 @@ mk sys = P {
     , tags      = M.Tags []
 }
 
+trimWhite :: [BodyLine] -> [BodyLine]
+trimWhite (Separator:xs) = trimWhite xs
+trimWhite (Newline:xs) = trimWhite xs
+trimWhite xs = xs
+
+renderBody :: [BodyLine] -> [String]
+renderBody = map convert . trimWhite . reverse . trimWhite
+    where
+        convert (Raw x)   = x
+        convert Separator = "</div><div class=\"stuff\">"
+        convert Newline   = "\n"
+
 -- | Returns full body text (composed of `body` and `footnotes`).
 fullbody :: Parser -> M.Body
 fullbody p = M.Body fullText
     where 
-        mainPart = concat $ reverse $ body p
+        mainPart = concat $ renderBody $ body p
         footPart = intercalate "\n<br>" (reverse $ footnotes p)
         fullText
           | null footPart = mainPart
@@ -210,16 +226,16 @@ append :: Parser -> String -> Parser
 append p s =
     case state p of
          Body | null $ strip s -> p {
-             body = "\n" : "</div><div class=\"stuff\">" : body p
+             body = Newline : Separator : body p
          }
          Body -> p {
-             body = "\n" : s : body p
+             body = Newline : Raw s : body p
          }
          Poem | null $ strip s -> p {
-             body = "\n" : "</div><div class=\"stuff\">" : body p
+             body = Newline : Separator : body p
          }
          Poem -> p {
-             body = "\n" : "<br />" : s : body p
+             body = Newline : Raw "<br />" : Raw s : body p
          }
          Summary -> p {
              summary = Just $ wrap
@@ -230,7 +246,7 @@ append p s =
              let (x:xs) = footnotes p
              in p { footnotes = (x ++ "\n" ++ s):xs}
          Code -> p {
-             body = "\n" : s : body p
+             body = Newline : Raw s : body p
          }
 
 
@@ -255,8 +271,8 @@ startFootnote p = OK p
     where 
         index    = show $ length (footnotes p) + 1        
         bodyTail = case body p of
-                        ("\n":xs) -> xs
-                        xs        -> xs
+                        (Newline:xs) -> xs
+                        xs           -> xs
         fmt nam ref = concat
                       [ "<a"
                       , " name = \"" ++ nam ++ index ++ "\""
@@ -264,14 +280,14 @@ startFootnote p = OK p
                       , "><sup>" ++ index ++ "</sup>"
                       , "</a>"
                       ]
-        bodyPart  = fmt "tx" "#fn"
+        bodyPart  = Raw $ fmt "tx" "#fn"
         footStart = fmt "fn" "#tx"
 
 -- | Switches parser into `Body` state.
 startBody :: Parser -> Parser
 startBody p =
     case state p of
-         Code -> p  { body  = "\n":"</pre>":body p
+         Code -> p  { body  = Newline:Raw "</pre>":body p
                     , state = Body
                     }
          _ -> p { state = Body }
@@ -280,7 +296,7 @@ startBody p =
 startCode :: Parser -> Processed Parser
 startCode p | state p /= Body = Fail
     "code is only allowed inside content block"
-startCode p = OK p  { body  = "\n":"<pre>":body p
+startCode p = OK p  { body  = Newline:Raw "<pre>":body p
                     , state = Code
                     }
 
