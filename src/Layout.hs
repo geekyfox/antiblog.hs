@@ -154,7 +154,7 @@ htmlHead w =
 
 -- | Produces the \"stamp\" block for top-right corner of the page.
 layoutStamp :: Augmented a -> Html
-layoutStamp w@AUG{baseUrl = base} =
+layoutStamp w =
     H.div ! class_ "page-header" $ do
         a ! mkref w "" $ "The Antiblog"
         H.div ! class_ "page-subheader" $ do
@@ -210,7 +210,9 @@ layoutEntryBarebone w@AUG{baseUrl = base} paged =
         entryClass  = fromString $ "entry color_" ++ show modulo
         bodyClass   = if tagless then "body tagless" else "body"
         self t      = a ! href (permalink base paged) $ t
-        readMore    = do "[" ; self "read more" ; "]"
+        readMore    = do
+                        br
+                        "[" ; self "read more" ; "]"
         taglink t   = do
                         preEscapedText "&nbsp;"
                         a ! mkref w ("/page/" ++ t ++ "/1")
