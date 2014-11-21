@@ -183,6 +183,7 @@ createEntry p e = withResource p (\conn -> do
     let uid = case rs of
                    [Only x] -> x
                    _ -> error $ "Weird result set: " ++ show rs
+    recordOptionalData conn e uid
     return $ AM uid)
 
 instance FromRow TagUsage where
