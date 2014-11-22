@@ -103,7 +103,7 @@ import Control.Monad(foldM)
 import Data.List(intercalate)
 import Data.String.Utils(strip)
 
-import Config(SystemName)
+import Antisync.ClientConfig(SystemName)
 import qualified Model as M
 import Utils
 

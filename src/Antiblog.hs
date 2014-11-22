@@ -4,15 +4,17 @@
 -- | Entrypoint module of `antiblog` executable.
 module Main(main) where
 
-import Control.Monad(liftM,liftM2)
+import Control.Monad(liftM,liftM2,when)
 import Control.Monad.IO.Class(liftIO)
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Data.Text.Lazy as T
 import Network.HTTP.Types.Status(forbidden403, notFound404)
+import System.Environment(getArgs)
 import Web.Scotty
 
+import Antiblog.ServerConfig
+import Anticommon.Config
 import Database
-import Config
 import Layout hiding (baseUrl,tags,title,summary)
 import Model
 import Utils
@@ -143,6 +145,8 @@ webloop db sys =
 -- | Entrypoint.
 main :: IO ()
 main = do
-    sys <- sysDefault    
+    args <- getArgs
+    when (length args /= 1) (error "Config file location is missing")
+    sys <- serverConfig (head args)    
     db <- mkPool (dbConnString sys)
     webloop db sys

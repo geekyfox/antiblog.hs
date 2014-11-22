@@ -28,7 +28,7 @@ import Text.Blaze.Internal(preEscapedText)
 import Text.RSS
 import Network.URI(parseURI)
 
-import Config(BaseURL)
+import Anticommon.Config(BaseURL)
 import qualified Model as M
 import Utils
 

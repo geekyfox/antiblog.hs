@@ -10,7 +10,6 @@ import Control.Monad(liftM, liftM2, filterM, join)
 import Data.List(intercalate)
 import Data.Map(lookup)
 import Data.Maybe(isJust, isNothing, fromJust)
-import System.Console.CmdArgs.Explicit
 import System.Directory
     ( doesDirectoryExist
     , doesFileExist
@@ -21,9 +20,10 @@ import System.IO.Strict(hGetContents)
 import System.IO.UTF8(hPutStr)
 import System.Posix (fileSize, getFileStatus)
 
+import Antisync.ClientCmdLine
+import Antisync.ClientConfig
 import Api
 import ApiClient
-import Config
 import Model(EntryFS, uid, md5sig)
 import Parser(parseText)
 import Utils
@@ -89,7 +89,7 @@ decideStatusM ix pe = pe >>= decideStatus ix
 type Status = Processed [(FilePath, Processed String)]
 
 -- | Reads file in the directory and decides their respective statuses.
-status :: FilePath -> ConfigCLI -> IO Status
+status :: FilePath -> Endpoint -> IO Status
 status root sys = liftM2 match local remote
     where
         local = loadDir (systemName sys) root
@@ -98,22 +98,7 @@ status root sys = liftM2 match local remote
             ix <- pix
             let decide = decideStatusM ix
             return $ map (second decide) local
-
--- | Verbosity level.
-data Verbosity = 
-    -- | Don't print `Skip` messages.
-      Normal
-    -- | Don't print "entry is not modified messages".
-    | Verbose      
-    -- | Print all messages.
-    | VeryVerbose
         
--- | Matches an entry against verbosity setting.
-shouldIgnore :: Verbosity -> Processed a -> Bool
-shouldIgnore Verbose (Skip "Not modified") = True
-shouldIgnore Normal  (Skip _)              = True
-shouldIgnore _       _                     = False
-
 -- | Prints status with given verbosity to stdout.
 showStatus :: Verbosity -> Status -> IO ()
 showStatus v = putStrLn . describe fun
@@ -124,7 +109,7 @@ showStatus v = putStrLn . describe fun
             | otherwise = "[" ++ describe id ps ++ "] " ++ fp
   
 -- | Inserts an ID to file on disk.
-injectId :: ConfigCLI -> FilePath -> Int -> IO ()
+injectId :: Endpoint -> FilePath -> Int -> IO ()
 injectId sys fpath id = load >>= save
     where
         prefix  = "## antiblog public " ++ expose (systemName sys) ++
@@ -135,7 +120,7 @@ injectId sys fpath id = load >>= save
         put c h = hPutStr h $ prefix ++ c
 
 -- | Synchronizes single file with remote server.
-syncOne :: ConfigCLI -> EntryIndex -> FilePath -> IO (Processed ())
+syncOne :: Endpoint -> EntryIndex -> FilePath -> IO (Processed ())
 syncOne sys srv fp = loaded >>= liftProc work |>> join
     where
         approve pe = pe >>= (\e -> decideStatus srv e >> return e)
@@ -149,7 +134,7 @@ syncOne sys srv fp = loaded >>= liftProc work |>> join
 
 -- | Syncronizes a list of files. Reports progress at given
 --   `Verbosity`.
-sync :: Verbosity -> [FilePath] -> ConfigCLI -> IO ()
+sync :: Verbosity -> [FilePath] -> Endpoint -> IO ()
 sync v files sys = queryIndexAsMap sys >>= describeM work >>= putStr
     where
         work srv = mapM (workOne srv) files |>> concat
@@ -159,100 +144,26 @@ sync v files sys = queryIndexAsMap sys >>= describeM work >>= putStr
           | otherwise = fp ++ " => " ++ describe (const "OK") res ++ "\n"
 
 -- | Continuously runs in foreground and does `sync` every second.
-pump :: [FilePath] -> ConfigCLI -> IO ()
+pump :: [FilePath] -> Endpoint -> IO ()
 pump files sys =
     do
         sync Verbose files sys
         threadDelay 1000000
         pump files sys
 
--- | What should be done according to command line arguments.
-data Action =
-    Status
-        { actionProd      :: Bool
-        , actionVerbosity :: Verbosity
-        }
-    | Sync
-        { actionFiles     :: [String]
-        , actionProd      :: Bool
-        , actionVerbosity :: Verbosity
-        }
-    | Pump
-        { actionFiles     :: [String]
-        , actionProd      :: Bool
-        }
-    | DoNothing
-
-ignoreArg :: Arg a
-ignoreArg = flagArg (\_ x -> Right x) ""
-
-prodFlag :: Flag Action
-prodFlag = flagNone ["prod"] mutate "Use production server"
-    where mutate a = a { actionProd = True }
-    
-verboseFlag :: Flag Action
-verboseFlag = flagNone ["verbose"] mutate "Print skipped entries (except not modified ones)"
-    where mutate a = a { actionVerbosity = Verbose }
-
-veryVerboseFlag :: Flag Action
-veryVerboseFlag = flagNone ["very-verbose"] mutate "Print all skipped entries"
-    where mutate a = a { actionVerbosity = VeryVerbose }
-
-statusMode :: Mode Action
-statusMode = mode
-    "status"
-    Status { actionProd = False, actionVerbosity = Normal }
-    "Compare status of local files to remote server"
-    ignoreArg
-    [prodFlag, verboseFlag, veryVerboseFlag]
-
-listFilesArg :: Arg Action
-listFilesArg = 
-    let upd v a = Right $ a { actionFiles = v:actionFiles a }
-    in Arg {
-        argValue   = upd,
-        argType    = "<files to upload>",
-        argRequire = True
-    }
-
-syncMode :: Mode Action
-syncMode = mode
-    "sync"
-    Sync { actionFiles = [], actionProd = False, actionVerbosity = Normal }
-    "Upload files to remote server"
-    listFilesArg
-    [prodFlag, verboseFlag, veryVerboseFlag]
-
-pumpMode :: Mode Action
-pumpMode = mode
-    "pump"
-    Pump { actionFiles = [], actionProd = False }
-    "Continuously pump files to server"
-    listFilesArg
-    []
-
-compositeMode :: Mode Action
-compositeMode = modes
-    "antisync"
-    DoNothing
-    "Command-line utility to synchronize antiblog posts"
-    [statusMode, syncMode, pumpMode]
-
 main :: IO ()
-main = processArgs compositeMode >>= exec
+main = decideAction >>= exec
 
 exec :: Action -> IO ()
-exec a = act a
+exec a = act $ actionType a
     where
-        sysIO
-            | actionProd a = sysProd
-            | otherwise    = sysDev
+        sysIO = loadOrDie $ actionEndpoint a
         verbose = actionVerbosity a
         files   = actionFiles a
-        act DoNothing = print compositeMode
-        act Status{} =
+        act DoNothing = putStrLn helpMessage
+        act Status =
             sysIO >>= status "." >>= showStatus verbose
-        act Sync{} =
+        act Sync =
             sysIO >>= sync verbose files
-        act Pump{} =
+        act Pump =
             sysIO >>= pump files    

@@ -32,15 +32,11 @@ yourself.
      ocassionally terminate (restart is automatic and takes less than a
      second).
 * Paths to configuration files are hardcoded. To be specific: 
- * webapp looks for
-  config at `~/antiblog/config.json`
- * `antisync` without `--prod` flag reads
-  `~/antiblog/config-dev.json` and 
- * `antisync --prod` assumes it is
-  `~/antiblog/config-prod.json`.
+ * `antisync` looks for config at `~/.antisync/config.json`;
+   to amend this, patch src/Antisync/ClientConfig.hs
+ * webapp looks for config at `~/antiblog/config.json`;
+   that can be overridden in configs/supervisord.conf
   
-  To change these bindings, patch `src/Config.hs`.
-
 Using an alternative reverse proxy or process supervisor shouldn't be
 hard, consult the documentation to your tool of choice.
 
@@ -129,12 +125,17 @@ git clone https://github.com/geekyfox/antiblog.git
  port number that you've set in nginx config. `password` in `dbConn` is
  the password that you've set when created the role.
 
- Client config `~/antiblog/config-dev.json`:
+ Client config `~/.antisync/config.json`:
  ```json
 {
-    "name"     : "dev",
-    "url"      : "http://hostname/subdirectory",
-    "apiKey"   : "secure_magic_constant"
+    "defaultServer" : "dev",
+    "servers" : [
+        {
+            "name"     : "dev",
+            "url"      : "http://hostname/subdirectory",
+            "apiKey"   : "secure_magic_constant"
+        }
+    ]
 }
  ```
  `url` and `apiKey` are same as in server config.

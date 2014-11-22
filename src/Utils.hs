@@ -75,14 +75,22 @@ transpose (Skip msg) = return $ Skip msg
 liftProc :: (Monad m) => (a -> m b) -> Processed a -> m (Processed b)
 liftProc f = transpose . liftM f
 
+-- | Converts `Processed` into either wrapped value or error message.
+toEither :: Processed a -> Either String a
+toEither (OK x)     = Right x
+toEither (Fail msg) = Left $ "FAIL: " ++ msg
+toEither (Skip msg) = Left $ "SKIP: " ++ msg
+
 -- | Makes a string representation of `Processed` using provided
 --   function to render `OK` values as-is.
 describe :: (a -> String) -> Processed a -> String
-describe f (OK x)     = f x
-describe _ (Fail msg) = "FAIL: " ++ msg
-describe _ (Skip msg) = "SKIP: " ++ msg
+describe f = either id f . toEither
 
 -- | Monad-ish version of `describe`.
 describeM :: (Monad m) => (a -> m String) -> Processed a -> m String
 describeM f x = transpose (liftM f x) |>> describe id
 
+-- | Either returns a wrapped value or prints out an error message
+--   and terminates the execution.
+exposeOrDie :: Processed a -> a
+exposeOrDie = either error id . toEither

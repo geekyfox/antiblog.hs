@@ -20,8 +20,8 @@ import Network.HTTP.Client
 import Network.HTTP.Types.Header
 import Network.HTTP.Types.Status
 
+import Antisync.ClientConfig
 import Api
-import Config
 import Model
 import Utils
 
@@ -40,23 +40,24 @@ fmtHttpError ex = show ex
 
 -- | Main wrapper for API calls. Makes a request, then parses response
 --   using `decodeData`.
-query :: (FromJSON a) => Request -> IO (Processed a)
-query req = withManager defaultManagerSettings protect |>> decodeData
+query :: (FromJSON a) => Request -> IOProc a
+query req = withManager defaultManagerSettings protect |>> decode
     where
         protect mgr  = work mgr `catch` handleError
         work mgr     = withResponse req mgr handleResult
         handleResult = liftM OK . brConsume . responseBody
         handleError  = return . Fail . fmtHttpError
+        decode x     = x >>= decodeData
 
 -- | Prepares a request for querying specific API method.
-mkRequest :: String -> ConfigCLI -> IO Request
+mkRequest :: String -> Endpoint -> IO Request
 mkRequest method sys = parseUrl url |>> setQueryString qs
     where
         url = apiUrl sys ++ method
         qs  = [("api_key", Just $ encodeUtf8 $ remoteApiKey sys)]
 
 -- | Prepares a request for POSTing to specific API method.
-mkPostRequest :: String -> ConfigCLI -> [(String, String)] -> IO Request
+mkPostRequest :: String -> Endpoint -> [(String, String)] -> IO Request
 mkPostRequest method sys args = baseRequest |>> attachArgs
     where
         baseRequest = mkRequest method sys
@@ -64,14 +65,14 @@ mkPostRequest method sys args = baseRequest |>> attachArgs
         attachArgs  = urlEncodedBody encodedArgs
 
 -- | Retrieves the list of entries on the server.
-retrieveIndex :: ConfigCLI -> IOProc [EntryHash]
+retrieveIndex :: Endpoint -> IOProc [EntryHash]
 retrieveIndex sys = mkRequest "index" sys >>= query
 
 -- | Shorthand type.
 type EntryIndex = Map Int String
 
 -- | Retrieves the list of entries on server as `Map Int String`.
-queryIndexAsMap :: ConfigCLI -> IOProc EntryIndex
+queryIndexAsMap :: Endpoint -> IOProc EntryIndex
 queryIndexAsMap sys = retrieveIndex sys |>> fmap toMap
     where
         toMap es = fromList [ (huid e, hash e) | e <- es ]
@@ -96,9 +97,9 @@ encode e = mapMaybe wrap optionals ++ mandatories
             ]
 
 -- | Updates an entry.
-updateEntry :: ConfigCLI -> EntryFS -> IOProc ReplyUP
+updateEntry :: Endpoint -> EntryFS -> IOProc ReplyUP
 updateEntry sys e = mkPostRequest "update" sys (encode e) >>= query
 
 -- | Creates an entry, returning new entry's ID on success.
-createEntry :: ConfigCLI -> EntryFS -> IOProc ReplyCR
+createEntry :: Endpoint -> EntryFS -> IOProc ReplyCR
 createEntry sys e = mkPostRequest "create" sys (encode e) >>= query

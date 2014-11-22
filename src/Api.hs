@@ -46,9 +46,8 @@ instance (ToJSON x) => ToJSON (ApiMessage x) where
     toJSON (AM x) = object ["content" .= toJSON x]
 
 -- | Parses JSON document wrapping parse errors as `Fail`.
-decodeData :: (FromJSON a) => Processed [ByteString] -> Processed a
-decodeData procFragments = do
-    fragments <- procFragments
+decodeData :: (FromJSON a) => [ByteString] -> Processed a
+decodeData fragments =
     case eitherDecode $ fromChunks fragments of
          Left errmsg -> Fail $ show ("Invalid JSON: " ++ errmsg
                                     ,fragments
