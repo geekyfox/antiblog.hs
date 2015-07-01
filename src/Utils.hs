@@ -81,6 +81,14 @@ toEither (OK x)     = Right x
 toEither (Fail msg) = Left $ "FAIL: " ++ msg
 toEither (Skip msg) = Left $ "SKIP: " ++ msg
 
+allOK :: [Processed a] -> Processed [a]
+allOK = impl []
+    where impl acc [] = OK $ reverse acc
+          impl acc (x:xs) = case x of
+                                 (OK y) -> impl (y:acc) xs
+                                 (Fail msg) -> Fail msg
+                                 (Skip _) -> impl acc xs
+
 -- | Makes a string representation of `Processed` using provided
 --   function to render `OK` values as-is.
 describe :: (a -> String) -> Processed a -> String
@@ -94,3 +102,15 @@ describeM f x = transpose (liftM f x) |>> describe id
 --   and terminates the execution.
 exposeOrDie :: Processed a -> a
 exposeOrDie = either error id . toEither
+
+procMaybe :: (Monad m) => String -> Maybe a -> m a
+procMaybe errmsg = maybe (fail errmsg) return
+
+readInt :: String -> Maybe Int
+readInt s = case reads s of
+                 [(num, "")] -> Just num
+                 _           -> Nothing
+
+class Encodable a where
+    encode :: a -> String
+    decode :: String -> Processed a

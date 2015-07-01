@@ -113,10 +113,14 @@ git clone https://github.com/geekyfox/antiblog.git
  Server config `~/antiblog/config.json`:
  ```json 
 {
-    "url"      : "http://hostname/subdirectory",
-    "apiKey"   : "secure_magic_constant",
-    "httpPort" : 3000,
-    "dbConn"   : "host='localhost' port=5432 user=antiblog dbname='antiblog' password='password'"
+    "url"          : "http://hostname/subdirectory",
+    "apiKey"       : "secure_magic_constant",
+    "httpPort"     : 3000,
+    "dbConn"       : "host='localhost' port=5432 user=antiblog dbname='antiblog' password='password'",
+    "siteTitle"    : "My brand new Antiblog",
+    "hasAuthor"    : true,
+    "hasPoweredBy" : true,
+    "hasMicroTag"  : true
 }
  ```
 

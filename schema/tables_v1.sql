@@ -6,14 +6,8 @@ CREATE TABLE IF NOT EXISTS entry (
     body      TEXT NOT NULL,
     read_more BOOLEAN NOT NULL,
     invisible BOOLEAN NOT NULL,
-    rank      INTEGER UNIQUE NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS entry_index (
-    entry_id      INTEGER PRIMARY KEY NOT NULL,
-    md5_signature VARCHAR(32) NOT NULL,
-
-    FOREIGN KEY (entry_id) REFERENCES entry (id) ON DELETE CASCADE
+    rank      INTEGER UNIQUE NOT NULL,
+    md5_signature VARCHAR(32) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS rss_entry (
@@ -40,3 +34,13 @@ CREATE TABLE IF NOT EXISTS entry_tag (
     PRIMARY KEY (entry_id, tag),
     FOREIGN KEY (entry_id) REFERENCES entry (id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS series_assignment (
+    entry_id INTEGER NOT NULL,
+    series   VARCHAR(255) NOT NULL,
+    index    INTEGER NOT NULL,
+    
+    PRIMARY KEY (entry_id, series),
+    FOREIGN KEY (entry_id) REFERENCES entry (id) ON DELETE CASCADE
+);
+

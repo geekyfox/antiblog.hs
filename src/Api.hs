@@ -9,7 +9,19 @@ import Data.Aeson
 import Data.ByteString(ByteString)
 import Data.ByteString.Lazy(fromChunks)
 
+import Model
 import Utils
+
+-- | Skeleton type for a single blog entry in different contexts.
+type EntryQuery a = Entry a (Maybe Summary) Title TransportExtra
+
+-- | Entry received by API endpoint for create.
+--   Doesn't have `uid` yet.
+type QueryCR = EntryQuery ()
+
+-- | Entry received by API endpoint for update.
+--   Always has `uid`.
+type QueryUP = EntryQuery Int
 
 -- | Entry ID and MD5 hash, used by `antisync` to detect whether
 --   an entry on the disk is different from an entry on webserver.
@@ -25,6 +37,9 @@ type ReplyCR = ApiMessage Int
 
 -- | Response type of `update` method.
 type ReplyUP = ApiMessage ()
+
+-- | Response type of `promote` method.
+type ReplyPR = ApiMessage ()
 
 instance FromJSON EntryHash where
     parseJSON (Object v) = do

@@ -2,7 +2,13 @@
 -- | Entrypoint module of `antisync` utility.
 module Antisync.ClientCmdLine
     ( Verbosity(Normal,Verbose,VeryVerbose)
-    , ActionType(Status,Sync,Pump,DoNothing)
+    , ActionType(
+         Status
+        ,Sync
+        ,Pump
+        ,Promote
+        ,DoNothing
+        )
     , Action(actionType,actionEndpoint,actionVerbosity,actionFiles)
     , decideAction
     , helpMessage
@@ -12,7 +18,7 @@ module Antisync.ClientCmdLine
 where
 
 import System.Console.CmdArgs.Explicit
-import Antisync.ClientConfig(SystemName)
+import Antisync.Config(SystemName)
 import Utils
 
 -- | Verbosity level.
@@ -30,7 +36,7 @@ shouldIgnore Verbose (Skip "Not modified") = True
 shouldIgnore Normal  (Skip _)              = True
 shouldIgnore _       _                     = False
 
-data ActionType = Status | Sync | Pump | DoNothing
+data ActionType = Status | Sync | Pump | Promote | DoNothing
 
 -- | What should be done according to command line arguments.
 data Action = Action {
@@ -101,12 +107,20 @@ pumpMode = mode
     listFilesArg
     []
 
+promoteMode :: Mode Action
+promoteMode = mode
+    "promote"
+    (mkAction Promote)
+    "Schedule entries to appear on front page"
+    listFilesArg
+    [targetFlag]
+
 compositeMode :: Mode Action
 compositeMode = modes
     "antisync"
     (mkAction DoNothing)
     "Command-line utility to synchronize antiblog posts"
-    [statusMode, syncMode, pumpMode]
+    [statusMode, syncMode, pumpMode, promoteMode]
 
 decideAction :: IO Action
 decideAction = processArgs compositeMode

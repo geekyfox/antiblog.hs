@@ -18,24 +18,37 @@
 module Antiblog.ServerConfig where
 
 import Control.Applicative
-import Control.Monad(mzero)
+import Control.Monad(mzero,liftM)
 import Data.Aeson
 import qualified Data.Text as T
 
-import Anticommon.Config
-import Utils(exposeOrDie,(|>>))
+import Config
+import Utils(exposeOrDie,(|>>),TaggedString(expose,wrap))
+
+newtype SiteTitle = SiteTitle String
+
+instance TaggedString SiteTitle where
+    expose (SiteTitle s) = s
+    wrap = SiteTitle
+
+instance FromJSON SiteTitle where
+    parseJSON = liftM wrap . parseJSON
 
 -- | Runtime configuration for the server.
 data ConfigSRV = SRV {
     -- | Base URL of a system. Used by `antiblog` as root for local
     --   hyperlinks.
-    baseUrl    :: BaseURL,
+     baseUrl    :: BaseURL
     -- | Secret API key.
-    apiKey     :: T.Text,
+    ,apiKey     :: T.Text
     -- | TCP port of webserver.
-    httpPort   :: Int,
+    ,httpPort   :: Int
     -- | Database connection string.
-    dbConnString :: String
+    ,dbConnString :: String
+    ,siteTitle :: SiteTitle
+    ,hasAuthor :: Bool
+    ,hasPoweredBy :: Bool
+    ,hasMicroTag :: Bool
 }
 
 instance FromJSON ConfigSRV where
@@ -44,6 +57,10 @@ instance FromJSON ConfigSRV where
             <*> v .: "apiKey"
             <*> v .: "httpPort"
             <*> v .: "dbConn"
+            <*> v .: "siteTitle"
+            <*> v .: "hasAuthor"
+            <*> v .: "hasPoweredBy"
+            <*> v .: "hasMicroTag"
     parseJSON _ = mzero
 
 -- | Loads server settings from `~/<filename>`.

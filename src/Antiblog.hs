@@ -4,6 +4,7 @@
 -- | Entrypoint module of `antiblog` executable.
 module Main(main) where
 
+import Control.Exception.Base(throw, PatternMatchFail(PatternMatchFail))
 import Control.Monad(liftM,liftM2,when)
 import Control.Monad.IO.Class(liftIO)
 import qualified Data.ByteString.Lazy.Char8 as C
@@ -12,54 +13,69 @@ import Network.HTTP.Types.Status(forbidden403, notFound404)
 import System.Environment(getArgs)
 import Web.Scotty
 
+import Api
 import Antiblog.ServerConfig
-import Anticommon.Config
-import Database
-import Layout hiding (baseUrl,tags,title,summary)
+import Antiblog.Database
+import Antiblog.Layout hiding (baseUrl,tags,title,summary)
 import Model
 import Utils
 
+getNotFound :: PoolT -> ConfigSRV -> IO T.Text
+getNotFound db cfg = augm |>> renderNotFound
+    where
+        tags = fetchTagCloud db
+        augm = liftM (\ts -> comprise cfg ts ()) tags
+
 -- | Provides an entry page at given URL.
-getEntry :: PoolT -> BaseURL -> String -> IO T.Text
-getEntry db baseUrl href = entry >>= maybe notFound render
+getEntry :: PoolT -> ConfigSRV -> String -> IO T.Text
+getEntry db cfg href = entry >>= maybe notFound render
     where
         entry    = fetchEntry db href
         tags     = fetchTagCloud db
-        notFound = getNotFound db baseUrl
+        notFound = getNotFound db cfg
         render e = tags |>> combine |>> renderEntry
             where
-                combine ts = comprise baseUrl ts e
+                combine ts = comprise cfg ts e
 
 -- | Provides a list page at given URL.
-getPage :: PoolT -> BaseURL -> String -> IO T.Text
-getPage db baseUrl href = augm |>> renderPage
+getPage :: PoolT -> ConfigSRV -> String -> IO T.Text
+getPage db cfg href = augm |>> renderPage
     where
         page = fetchPage db href
         tags = fetchTagCloud db
-        augm = liftM2 (comprise baseUrl) tags page
+        augm = liftM2 (comprise cfg) tags page
         
 -- | Provides an RSS feed.
-getFeed :: PoolT -> BaseURL -> IO String
-getFeed db baseUrl = liftM (renderFeed baseUrl) $ fetchFeed db
+getFeed :: PoolT -> ConfigSRV -> IO String
+getFeed db cfg = liftM render $ fetchFeed db
+    where
+        render = renderFeed cfg
 
 -- | Provides a random link.
-getRandom :: PoolT -> BaseURL -> Maybe T.Text -> IO T.Text
-getRandom db baseUrl ref = link |>> urlConcat baseUrl |>> T.pack
-    where link = case ref of
+getRandom :: PoolT -> ConfigSRV -> Maybe T.Text -> IO T.Text
+getRandom db cfg ref = link |>> urlConcat base |>> T.pack
+    where
+        base = baseUrl cfg
+        link = case ref of
             Just r  -> fetchRandomExcept db r
             Nothing -> fetchRandom db
-
-getNotFound :: PoolT -> BaseURL -> IO T.Text
-getNotFound db baseUrl = augm |>> renderNotFound
-    where
-        tags = fetchTagCloud db
-        augm = liftM (\ts -> comprise baseUrl ts ()) tags
 
 mparam :: (Parsable a) => T.Text -> ActionM (Maybe a)
 mparam key = fmap Just (param key) `rescue` (\_ -> return Nothing)
 
 defparam :: (Parsable a) => a -> T.Text -> ActionM a
 defparam def key = param key `rescue` (\_ -> return def)
+
+encparam :: (Encodable a) => a -> T.Text -> ActionM a
+encparam def key = do
+    mval <- mparam key
+    case mval of
+         Nothing -> return def
+         Just t -> case decode t of
+                        OK v -> return v
+                        Skip _ -> return def
+                        Fail msg -> throw (PatternMatchFail msg)
+                        
 
 -- | Wrapper that validates that api_key in request matches one in
 --   config.
@@ -73,15 +89,23 @@ secure conf next = mparam "api_key" >>= validate
         refuse msg = status forbidden403 >> text msg
 
 -- | Decodes params for entry create.
-decodeEntryCreate :: ActionM EntryCR
+decodeEntryCreate :: ActionM QueryCR
 decodeEntryCreate = decodeEntry (return ())
 
 -- | Decodes params for entry update.
-decodeEntryUpdate :: ActionM EntryUP
+decodeEntryUpdate :: ActionM QueryUP
 decodeEntryUpdate = decodeEntry (param "id")
 
+instance Parsable SeriesRef where
+    parseParam t =
+        case words $ T.unpack t of
+             [a, b] -> case readInt b of
+                            Just x  -> Right (SeriesRef a x)
+                            Nothing -> Left "Parse error"
+             _ -> Left "Parse error"
+
 -- | Decodes params for entry create/update.
-decodeEntry :: ActionM a -> ActionM (EntryRQ a)
+decodeEntry :: ActionM a -> ActionM (EntryQuery a)
 decodeEntry muid = do
     uid      <- muid    
     body     <- param "body"
@@ -91,23 +115,27 @@ decodeEntry muid = do
     metalink <- mparam "metalink"
     summary  <- mparam "summary"
     tags     <- defparam "" "tags"
+    series   <- encparam (Series []) "series"
     return Entry {
         title      = wrap title,
         Model.body = wrap body,
         symlink    = fmap wrap symlink,
         metalink   = fmap wrap metalink,
         uid        = uid,
-        md5sig     = md5sig,
         summary    = fmap wrap summary,
-        tags       = wrap tags
+        tags       = wrap tags,
+        extra      = TREX md5sig series
     }
+
+decodeEntryPromote :: ActionM Int
+decodeEntryPromote = param "id"
 
 -- | Main execution loop.
 webloop :: PoolT -> ConfigSRV -> IO ()
 webloop db sys =
     let
-        invoke_ f        = liftIO (f db $ baseUrl sys)
-        invoke f arg     = liftIO (f db (baseUrl sys) arg)
+        invoke_ f        = liftIO (f db sys)
+        invoke f arg     = liftIO (f db sys arg)
         htmlIO' f url    = invoke f url >>= html
         htmlIO f suf sub = htmlIO' f $ suf ++ sub
     in scotty (httpPort sys) $ do
@@ -119,7 +147,7 @@ webloop db sys =
             param "id" >>= htmlIO getPage "/page/"
         get "/page/:tag/:id" $ do
             tag <- param "tag"
-            param "id" >>= htmlIO getPage ("/page/" ++ tag ++ "/")
+            param "id" >>= htmlIO getPage ("/page/" ++ tag ++ "/")            
         get "/" $
             htmlIO' getPage "/"
         get "/meta/:id" $
@@ -137,6 +165,10 @@ webloop db sys =
         post "/api/create" $ secure sys $ do
             e <- decodeEntryCreate
             result <- liftIO (createEntry db e)
+            json result
+        post "/api/promote" $ secure sys $ do
+            uid <- decodeEntryPromote
+            result <- liftIO (promoteEntry db uid)
             json result
         notFound $ do
             status notFound404

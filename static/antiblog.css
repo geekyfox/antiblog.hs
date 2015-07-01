@@ -236,3 +236,11 @@ div.tag-cloud a:hover {
     text-decoration: underline;
 }
 
+div.series-links {
+    border-radius:10px;
+    border:1px dashed black;
+    text-align: center;
+    margin-bottom: 5px;
+    padding: 5px;
+}
+

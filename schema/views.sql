@@ -1,51 +1,99 @@
 
 --
 -- Here we infer the tags by the following rules:
+--
 --  * every entry has it's own "natural" tags
 --  * every "small" (read_more = false; meaning that teaser and
 --    body are the same) entry is tagged "micro"
 --  * every entry with "meta" link is tagged "meta"
+--  * every entry has an empty ('') tag
 --
 CREATE OR REPLACE VIEW effective_entry_tag AS
 SELECT DISTINCT * FROM (
-        SELECT entry_id, tag FROM entry_tag
+    -- Generic tagged entries
+    SELECT entry_id, tag FROM entry_tag
     UNION
-        SELECT id, 'micro' FROM entry
-        WHERE NOT read_more
+    -- "Small" entries
+    SELECT id, 'micro' FROM entry WHERE NOT read_more
     UNION
-        SELECT entry_id, 'meta' FROM symlink
-        WHERE kind = 'meta'
-) sq
-ORDER BY tag;
+    -- Meta-entries
+    SELECT entry_id, 'meta' FROM symlink WHERE kind = 'meta'
+    UNION
+    -- All entries 
+    SELECT id, '' FROM entry
+) sq;
+
+--
+-- This is the list of all known tags to display in tag cloud.
+--
+CREATE OR REPLACE VIEW known_tag_volatile AS
+SELECT tag, count(1)::integer AS counter
+FROM effective_entry_tag
+WHERE tag <> ''
+GROUP BY tag
+ORDER BY counter DESC;
+
+DROP MATERIALIZED VIEW known_tag;
+CREATE MATERIALIZED VIEW known_tag
+AS SELECT * FROM known_tag_volatile;
 
 --
 -- Here we do pagination.
 --
 -- Row (entry_id, tag, x, y) means that entry is present at
--- y-th position of x-th page of given tag; front page list
--- is assumed to have tag = ''.
+-- y-th position of x-th page of given tag.
 --
 CREATE OR REPLACE VIEW pagination AS
-WITH
-entry_tag_rank AS (
-    SELECT entry_id, tag, rank
-    FROM effective_entry_tag t, entry e
-    WHERE t.entry_id = e.id
+SELECT entry_id, tag
+     , FLOOR(abs_index / 5) + 1 AS page_id
+     , (abs_index % 5 + 1)::integer AS entry_index
+FROM (
+    SELECT entry_id, tag
+         , RANK() OVER (PARTITION BY tag ORDER BY rank) - 1
+           AS abs_index
+    FROM (
+        SELECT entry_id, tag, rank
+        FROM effective_entry_tag t, entry e
+        WHERE t.entry_id = e.id
+    ) AS entry_tag_rank
+) AS entry_tag_index;
+
+CREATE OR REPLACE VIEW page AS
+SELECT DISTINCT page_id, tag
+FROM pagination;
+
+CREATE OR REPLACE VIEW page_url AS
+SELECT page_id, tag, '/page/'||tag||'/'||page_id AS href
+     , (page_id <> 1) AS primary
+FROM page WHERE tag <> ''
 UNION
-    SELECT id AS entry_id, '' AS tag, rank
-    FROM entry WHERE NOT invisible
-), absolute_index AS (
-    SELECT etr.entry_id, etr.tag AS tag, (
-        SELECT COUNT(1) FROM entry_tag_rank tt
-        WHERE tt.rank < etr.rank AND etr.tag = tt.tag
-    ) AS abs_index
-    FROM entry_tag_rank etr
-)
-SELECT
-    ai.entry_id, ai.tag,
-    floor(ai.abs_index / 5) + 1 AS page_id,
-    (ai.abs_index % 5 + 1)::integer AS entry_index
-FROM absolute_index ai;
+SELECT page_id, tag, '/page/'||tag AS href, true
+FROM page WHERE tag <> '' AND page_id = 1
+UNION
+SELECT page_id, '', '/page/'||page_id AS href, (page_id <> 1)
+FROM page WHERE tag = ''
+UNION
+SELECT 1, '', '/', true
+FROM page WHERE tag = '' AND page_id = 1
+UNION
+SELECT last_page_id, tag, '/page/'||tag||'/last', false
+FROM (
+    SELECT MAX(page_id) AS last_page_id, tag
+    FROM page WHERE tag <> '' GROUP BY tag
+) sq1
+UNION
+SELECT last_page_id, tag, '/page/last', false
+FROM (
+    SELECT MAX(page_id) AS last_page_id, tag
+    FROM page WHERE tag = '' GROUP BY tag
+) sq2;
+
+CREATE OR REPLACE VIEW orphaned_page AS
+SELECT page_id, tag FROM page p
+WHERE NOT EXISTS (
+    SELECT 1 FROM page_url pu
+    WHERE pu.tag = p.tag AND pu.page_id = p.page_id
+);
 
 --
 -- Here we bind URLs to entries.
@@ -54,36 +102,25 @@ FROM absolute_index ai;
 -- at x-th position of page at url.
 --
 CREATE OR REPLACE VIEW url_binding AS
-    SELECT
-        '/entry/'||id    AS href,
-        id               AS entry_id,
-        'entry'::varchar AS kind,
-        1                AS index
+    SELECT '/entry/'||id    AS href
+         , id               AS entry_id
+         , 'entry'::varchar AS kind
+         , 1                AS index
     FROM entry WHERE NOT invisible
 UNION
-    SELECT
-        '/entry/'||link, entry_id, 'entry', 1
+    SELECT '/entry/'||link, entry_id, 'entry', 1
     FROM symlink WHERE kind='normal'
 UNION
-    SELECT
-        '/meta/'||link, entry_id, 'entry.meta', 1
+    SELECT '/meta/'||link, entry_id, 'entry.meta', 1
     FROM symlink WHERE kind='meta'
 UNION
-    SELECT
-        '/page/'||page_id, entry_id, 'list', entry_index
-    FROM pagination WHERE tag = ''
-UNION
-    SELECT
-        '/page/'||tag||'/'||page_id, entry_id, 'list', entry_index
-    FROM pagination WHERE tag <> '' AND tag <> 'meta'
-UNION
-    SELECT
-        '/page/meta/'||page_id, entry_id, 'list.meta', entry_index
-    FROM pagination WHERE tag = 'meta'
-UNION
-    SELECT
-        '/', entry_id, 'list', entry_index
-    FROM pagination WHERE tag = '' AND page_id = 1;
+    SELECT pu.href, p.entry_id
+         , CASE WHEN p.tag = 'meta' THEN 'list.meta'
+                ELSE 'list'
+           END
+         , p.entry_index
+    FROM page_url pu, pagination p
+    WHERE pu.tag = p.tag AND pu.page_id = p.page_id;
 
 --
 -- Here we join url_binding, entry and effective_entry_tag to
@@ -124,33 +161,85 @@ WHERE p.entry_id = e.id;
 -- Here we collect data for previous/next links.
 --
 CREATE OR REPLACE VIEW previous_next_volatile AS
-WITH possibles AS (
-    SELECT
-        '/page/'||page_id AS href,
-        CASE WHEN page_id = 2
-             THEN '/'
-              ELSE '/page/'||(page_id - 1) 
-        END AS previous,
-        '/page/'||(page_id + 1) AS next
-    FROM pagination WHERE tag = ''
-UNION
-    SELECT '/page/'||tag||'/'||page_id AS href,
-           '/page/'||tag||'/'||(page_id - 1) AS previous,
-           '/page/'||tag||'/'||(page_id + 1) AS next
-    FROM pagination WHERE tag <> ''
-UNION
-    SELECT '/' AS href,
-           null AS previous,
-           '/page/2' AS next
-    FROM pagination WHERE tag = '' AND page_id = 1
+SELECT pu.href
+     , (SELECT pu2.href FROM page_url pu2
+        WHERE pu.tag = pu2.tag
+          AND pu.page_id = pu2.page_id + 1
+          AND pu2.primary) AS previous
+     , (SELECT pu2.href FROM page_url pu2
+        WHERE pu.tag = pu2.tag
+          AND pu.page_id = pu2.page_id - 1
+          AND pu2.primary) AS next
+FROM page_url pu;
+
+CREATE OR REPLACE VIEW series_links_volatile AS
+WITH indices AS (
+    SELECT entry_id, s.series
+         , index AS own_index
+         , (
+             SELECT MIN(index)
+             FROM series_assignment ss
+             WHERE s.series = ss.series
+           ) AS min_index
+         , (
+             SELECT MAX(index)
+             FROM series_assignment ss
+             WHERE s.series = ss.series AND s.index > ss.index
+           ) AS prev_index
+         , (
+             SELECT MIN(index)
+             FROM series_assignment ss
+             WHERE s.series = ss.series AND s.index < ss.index
+           ) AS next_index
+         , (
+             SELECT MAX(index)
+             FROM series_assignment ss
+             WHERE s.series = ss.series
+           ) AS max_index           
+    FROM series_assignment s
+),
+refs AS (
+    SELECT i.entry_id, i.series
+         , CASE WHEN i.own_index = i.min_index
+                THEN NULL
+                ELSE (
+                    SELECT format_entry_link(entry_id)
+                    FROM series_assignment s
+                    WHERE s.series = i.series
+                    AND s.index = i.min_index
+                )
+           END AS first_entry_link
+         , (
+             SELECT format_entry_link(entry_id) 
+             FROM series_assignment s
+             WHERE s.series = i.series
+             AND s.index = i.prev_index
+           ) AS prev_entry_link
+         , (
+             SELECT format_entry_link(entry_id)
+             FROM series_assignment s
+             WHERE s.series = i.series
+             AND s.index = i.next_index
+           ) AS next_entry_link
+         , CASE WHEN i.own_index = i.max_index
+                THEN NULL
+                ELSE (
+                    SELECT format_entry_link(entry_id)
+                    FROM series_assignment s
+                    WHERE s.series = i.series
+                    AND s.index = i.max_index
+                )
+           END AS last_entry_link                   
+    FROM indices i
+),
+nontrivial AS (
+    SELECT * FROM refs
+    WHERE first_entry_link IS NOT NULL
+       OR prev_entry_link  IS NOT NULL
+       OR next_entry_link  IS NOT NULL
+       OR last_entry_link  IS NOT NULL              
 )
-SELECT DISTINCT
-    href AS href,
-    (SELECT DISTINCT href FROM url_binding
-     WHERE href = previous) AS previous,
-    (SELECT DISTINCT href FROM url_binding
-     WHERE href = next) AS next
-FROM possibles;
+SELECT * FROM nontrivial;
 
 DROP MATERIALIZED VIEW page_display;
 CREATE MATERIALIZED VIEW page_display
@@ -159,3 +248,7 @@ AS SELECT * FROM page_display_volatile;
 DROP MATERIALIZED VIEW previous_next;
 CREATE MATERIALIZED VIEW previous_next
 AS SELECT * FROM previous_next_volatile;
+
+DROP MATERIALIZED VIEW series_links;
+CREATE MATERIALIZED VIEW series_links
+AS SELECT * FROM series_links_volatile;

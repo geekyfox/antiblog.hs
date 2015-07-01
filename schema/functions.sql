@@ -95,8 +95,10 @@ $$ LANGUAGE plpgsql VOLATILE;
 CREATE OR REPLACE FUNCTION update_materialized_views()
 RETURNS VOID AS $$
 BEGIN
+    REFRESH MATERIALIZED VIEW known_tag;
     REFRESH MATERIALIZED VIEW page_display;
     REFRESH MATERIALIZED VIEW previous_next;
+    REFRESH MATERIALIZED VIEW series_links;
 END;
 $$ LANGUAGE plpgsql VOLATILE;
 
@@ -273,3 +275,20 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql VOLATILE;
+
+CREATE OR REPLACE FUNCTION promote_entry(a_entry_id INTEGER)
+RETURNS VOID AS $$
+DECLARE
+    v_max int;
+BEGIN
+    SELECT MAX(rank) INTO v_max FROM entry;
+    
+    IF v_max IS NOT NULL THEN
+        UPDATE entry SET rank = v_max + 1
+        WHERE id = a_entry_id;
+        
+        PERFORM update_materialized_views();
+    END IF;
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+

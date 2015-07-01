@@ -20,12 +20,12 @@ import System.IO.Strict(hGetContents)
 import System.IO.UTF8(hPutStr)
 import System.Posix (fileSize, getFileStatus)
 
+import Antisync.ApiClient
 import Antisync.ClientCmdLine
-import Antisync.ClientConfig
+import Antisync.Config
+import Antisync.Parser(parseText)
 import Api
-import ApiClient
-import Model(EntryFS, uid, md5sig)
-import Parser(parseText)
+import Model
 import Utils
 
 -- | Reads and parses a file.
@@ -151,6 +151,18 @@ pump files sys =
         threadDelay 1000000
         pump files sys
 
+promote :: [FilePath] -> Endpoint -> IO ()
+promote files sys = mapM_ workOne files
+    where
+        workOne f = simplify (perform f) >>= render f
+        perform f = loadFile (systemName sys) f
+                    |>> extractId
+                    |>> promoteOne
+        extractId = join . liftM (procMaybe "ID is missing" . uid)
+        promoteOne = liftM (promoteEntry sys)
+        simplify x = join (x |>> transpose |>> liftM join)
+        render f p = putStrLn $ f ++ " => " ++ describe (const "OK") p
+
 main :: IO ()
 main = decideAction >>= exec
 
@@ -166,4 +178,6 @@ exec a = act $ actionType a
         act Sync =
             sysIO >>= sync verbose files
         act Pump =
-            sysIO >>= pump files    
+            sysIO >>= pump files
+        act Promote =
+            sysIO >>= promote files
