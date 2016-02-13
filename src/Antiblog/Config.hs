@@ -15,15 +15,15 @@
 }
 @
 -}
-module Antiblog.ServerConfig where
+module Antiblog.Config where
 
 import Control.Applicative
 import Control.Monad(mzero,liftM)
 import Data.Aeson
 import qualified Data.Text as T
 
-import Config
-import Utils(exposeOrDie,(|>>),TaggedString(expose,wrap))
+import Anticore.Config
+import Anticore.Utils(exposeOrDie,(|>>),TaggedString(expose,wrap))
 
 newtype SiteTitle = SiteTitle String
 

@@ -4,14 +4,15 @@
 {- | Common logic and types shared between client-side and
      server-side runtime configurations.
 -}
-module Anticommon.Config where
+module Anticore.Config where
 
 import Control.Monad(liftM)
 import Data.Aeson
 import qualified Data.ByteString.Lazy as L
 import System.Directory(getHomeDirectory)
 import System.FilePath.Posix(combine)
-import Utils
+
+import Anticore.Utils
 
 -- | Typesafe wrapper around system's base URL.
 newtype BaseURL = BaseURL String

@@ -9,13 +9,13 @@
 --   This is the reason why `BaseURL`/`HrefFun` is carried all over
 --   the place.
 
-module Layout where
+module Antiblog.Layout where
 
 import Control.Monad(when, unless)
 import Data.String(IsString,fromString)
 import Data.Maybe(fromMaybe,listToMaybe,catMaybes,fromJust)
 import Data.Text.Lazy(Text)
-import Text.Blaze.Html4.Strict hiding (title)
+import Text.Blaze.Html4.Strict hiding (title,map)
 import qualified Text.Blaze.Html4.Strict as H
 import Text.Blaze.Html4.Strict.Attributes hiding 
     (title
@@ -24,13 +24,16 @@ import Text.Blaze.Html4.Strict.Attributes hiding
     )
 import qualified Text.Blaze.Html4.Strict.Attributes as A
 import Text.Blaze.Html.Renderer.Text
-import Text.Blaze.Internal(preEscapedText)
+--import Text.Blaze.Internal(preEscapedText)
 import Text.RSS
 import Network.URI(parseURI)
 
-import Anticommon.Config(BaseURL)
-import qualified Model as M
-import Utils
+import Anticore.Config(BaseURL)
+import qualified Anticore.Model as M
+import Anticore.Utils
+
+import qualified Antiblog.Config as C
+import Antiblog.Model
 
 data Augmented a = AUG {
      value :: a
@@ -38,48 +41,66 @@ data Augmented a = AUG {
     -- | Whether or not to add RSS link
     ,hasRssLink :: Bool
     -- | Title (for \<title\> and for OpenGraph section)
-    ,title   :: M.Title
+    ,title :: M.Title
     -- | URL of the page (for OpenGraph section)
-    ,ownUrl     :: String
+    ,ownUrl :: String
     -- | Summary (for OpenGraph section)
     ,summary :: M.Summary
     ,tags :: [M.TagUsage]
+    -- | General title of the website
+    ,siteTitle :: !C.SiteTitle
+    ,hasAuthor :: !Bool
+    ,hasPoweredBy :: !Bool
+    ,hasMicroTag :: !Bool
 }
 
 class Entity a where
     entityHasRss  :: a -> Bool
-    entityTitle   :: a -> M.Title
+    entityTitle   :: a -> Maybe M.Title
     entityUrl     :: BaseURL -> a -> String
-    entitySummary :: a -> M.Summary
+    entitySummary :: a -> Maybe M.Summary
 
-comprise :: (Entity a) => BaseURL -> [M.TagUsage] -> a -> Augmented a
-comprise base tags x = AUG
-    {value   = x
-    ,baseUrl = base
+comprise :: (Entity a) => C.ConfigSRV -> [M.TagUsage] -> a -> Augmented a
+comprise cfg tags x = AUG
+    {value      = x
+    ,baseUrl    = base
     ,hasRssLink = entityHasRss x
-    ,title   = entityTitle x
-    ,ownUrl  = entityUrl base x
-    ,summary = unformat $ entitySummary x
-    ,tags    = tags
+    ,title      = wrap $ generalTitle ++ suffix (entityTitle x)
+    ,ownUrl     = entityUrl base x
+    ,summary    = unformat $ fromMaybe extendedTitle $ entitySummary x
+    ,tags       = tags
+    ,siteTitle  = C.siteTitle cfg
+    ,hasAuthor  = C.hasAuthor cfg
+    ,hasPoweredBy = C.hasPoweredBy cfg
+    ,hasMicroTag = C.hasMicroTag cfg
     }
+    where
+        base = C.baseUrl cfg
+        generalTitle = expose $ C.siteTitle cfg
+        extendedTitle
+            | C.hasAuthor cfg = wrap $ generalTitle ++ " by Ivan Appel"
+            | otherwise = wrap generalTitle
+        suffix = maybe "" (\x -> ": " ++ x) . fmap expose
 
-instance Entity M.Page where
+instance Entity Page where
     entityHasRss _ = True
-    entityTitle _   = wrap "The Antiblog"
-    entityUrl b  = fromString . urlConcat b . M.own
-    entitySummary _ = wrap "The Antiblog by Ivan Appel"
+    entityTitle _   = Nothing
+    entityUrl b = fromString . urlConcat b . own
+    entitySummary _ = Nothing
+        
+        -- wrap "The Antiblog by Ivan Appel"
 
-instance Entity M.PagedEntry where
+instance Entity SingleEntry where
     entityHasRss _ = False
-    entityTitle  = wrap . (++) "The Antiblog: " . displayTitle . M.entry
-    entityUrl = permalink
-    entitySummary   = M.summary . M.entry
+    entityTitle = Just . wrap . displayTitle . unbox
+    entityUrl b = permalink b . unbox
+    entitySummary = Just . M.summary . unbox
 
 instance Entity () where
     entityHasRss _ = False
-    entityTitle _ = wrap "The Antiblog"
+    entityTitle _ = Nothing
     entityUrl b _ = expose b
-    entitySummary _ = wrap "The Antiblog by Ivan Appel"
+    entitySummary _ = Nothing
 
 -- | Produces a `HrefFun` that prepends `BaseURL` 
 mkref :: Augmented a -> String -> Attribute
@@ -108,22 +129,21 @@ opengraph w =
         property = customAttribute "property"
 
 -- | Display title of the entry (either title or #\$id)
-displayTitle :: (IsString a) => M.EntryDB -> a
+displayTitle :: (IsString b) => EntryData -> b
 displayTitle e = fromString $ fmt $ expose $ M.title e
     where fmt "" = '#' : show (M.uid e)
           fmt st = st
 
 -- | Permanent link of the entry.
-permalink :: (IsString a) => BaseURL -> M.PagedEntry -> a
-permalink base paged = fromString $ urlConcat base preferred
+permalink :: (IsString b) => BaseURL -> EntryData -> b
+permalink base entry = fromString $ urlConcat base preferred
     where
         preferred = fromMaybe standard optional
         standard  = "entry/" ++ show (M.uid entry)
-        entry     = M.entry paged
         optional  = listToMaybe $ catMaybes priority
-        priority  = case M.pageKind paged of
-                         M.Normal -> [symlink, metalink]
-                         M.Meta   -> [metalink, symlink]
+        priority  = case pageKind entry of
+                         Normal -> [symlink, metalink]
+                         Meta   -> [metalink, symlink]
         symlink   = M.symlink entry  |>> expose
         metalink  = M.metalink entry |>> expose
 
@@ -156,26 +176,44 @@ htmlHead w =
 layoutStamp :: Augmented a -> Html
 layoutStamp w =
     H.div ! class_ "page-header" $ do
-        a ! mkref w "" $ "The Antiblog"
-        H.div ! class_ "page-subheader" $ do
-            "by "
-            a ! href "http://www.geekyfox.net" $ "Ivan Appel"
-            hr
+        a ! mkref w "" $ shapeshift $ siteTitle w
+        when (hasAuthor w) $
             H.div ! class_ "page-subheader" $ do
-                a ! mkref w "meta/about" $ "About"
-                " | "
-                a ! mkref w "rss.xml" $ "RSS"
-                " | "
-                a ! mkref w "entry/random" $ "Random"
-                
-layoutTagCloud :: Augmented a -> Html
-layoutTagCloud w = (H.div ! class_ "tag-cloud") $ mapM_ one $ tags w
+                "by "
+                a ! href "http://www.geekyfox.net" $ "Ivan Appel"
+        when (hasPoweredBy w) $
+            H.div ! class_ "page-subheader" $ do
+                "powered by "
+                a ! href "http://antiblog.geekyfox.net" $ "The Antiblog"
+        H.div ! class_ "page-subheader" $ do
+            hr
+            a ! mkref w "meta/about" $ "About"
+            " | "
+            a ! mkref w "rss.xml" $ "RSS"
+            " | "
+            a ! mkref w "entry/random" $ "Random"
+
+prettifyTag = map f
     where
+        f '_' = ' '
+        f x   = x
+
+patchTags :: Augmented a -> (b -> String) -> [b] -> [b]
+patchTags w f xs
+  | hasMicroTag w = xs
+  | otherwise     = [ x | x <- xs, f x /= "micro" ]
+
+layoutTagCloud :: Augmented a -> Html
+layoutTagCloud w
+      | null ts = return ()
+      | otherwise = (H.div ! class_ "tag-cloud") $ mapM_ one ts
+    where
+        ts = patchTags w M.tuTag $ tags w
         one (M.TagUsage tag count) = 
             H.div ! class_ (fromString $ classify count) $
                 H.div ! class_ "colored" $
-                    a ! mkref w ("/page/" ++ tag ++ "/1")
-                      $ fromString tag
+                    a ! mkref w ("/page/" ++ tag)
+                      $ fromString $ prettifyTag tag
         classify x = "color_" ++ show ((x `mod` 6) + 1)
 
 -- | Attaches the common header to content.
@@ -190,54 +228,71 @@ layoutCommon w content =
                 content
 
 -- | Produces a barebone block of HTML with an entry.
-layoutEntryBarebone :: Augmented a -> M.PagedEntry -> Html
-layoutEntryBarebone w@AUG{baseUrl = base} paged =
+layoutEntryBarebone :: (RenderEntry b) => Augmented a -> b -> Html
+layoutEntryBarebone w@AUG{baseUrl = base} ec =
     H.div ! class_ entryClass $ do
         H.div ! class_ "header colored" $ self (displayTitle e)
         H.div ! class_ bodyClass $
             H.div ! class_ "stuff" $ do
+                seriesLinksBlock
                 preEscapedText (shapeshift $ M.body e)
-                when (M.readMore paged) readMore
+                when (readMore ec) readMoreBlock    
         unless tagless $
             H.div ! class_ "footer" $
-                mapM_ taglink ts    
+                mapM_ taglink ts'
     
     where
-        e           = M.entry paged
-        (M.Tags ts) = M.tags e
-        tagless     = null ts
+        e           = unbox ec
+        (M.Tags ts)   = M.tags e
+        ts'         = patchTags w Prelude.id ts
+        tagless     = null ts'
         modulo      = (M.uid e `mod` 6) + 1        
         entryClass  = fromString $ "entry color_" ++ show modulo
         bodyClass   = if tagless then "body tagless" else "body"
-        self t      = a ! href (permalink base paged) $ t
-        readMore    = do
+        self t      = a ! href (permalink base e) $ t
+        readMoreBlock    = do
                         br
                         "[" ; self "read more" ; "]"
         taglink t   = do
                         preEscapedText "&nbsp;"
-                        a ! mkref w ("/page/" ++ t ++ "/1")
+                        a ! mkref w ("/page/" ++ t)
                           ! class_ "colored"
-                          $ fromString t
+                          $ fromString $ prettifyTag t
+        seriesLinksBlock =
+            case seriesLinks ec of
+                 Nothing -> return ()
+                 Just sl -> H.div ! class_ "series-links" $ do         
+                     sLink "First in series" $ linkFirst sl
+                     " | "
+                     sLink "Previous" $ linkPrev sl
+                     " | "
+                     sLink "Next" $ linkNext sl
+                     " | "
+                     sLink "Last in series" $ linkLast sl
+        sLink :: Html -> Maybe String -> Html
+        sLink txt Nothing = txt
+        sLink txt (Just v) = a ! mkref w v $ txt
 
 -- | Produces a complete page with single entry.
-layoutEntry :: Augmented M.PagedEntry -> Html
+layoutEntry :: Augmented SingleEntry -> Html
 layoutEntry w@AUG{value = paged} = layoutCommon w inner
     where
-        inner  = layoutEntryBarebone w paged
+        inner = layoutEntryBarebone w paged
 
 -- | Produces a complete page with multiple entries
-layoutPage :: Augmented M.Page -> Html
+layoutPage :: Augmented Page -> Html
 layoutPage w@AUG{value = page} = layoutCommon w inner
     where
         navi f css txt =
             case f page of
                  Nothing -> return ()
                  Just h  -> H.div ! class_ css $ a ! mkref w h $ txt
+        snippet = layoutEntryBarebone w
         inner = do
-            mapM_ (layoutEntryBarebone w) $ M.entries page
+            mapM_ snippet $ entries page
             H.div ! class_ "navi-container" $ do
-                navi M.previous "navi previous" "Previous page"
-                navi M.next     "navi next"     "Next page"  
+                navi previous "navi previous" "Previous page"
+                navi next     "navi next"     "Next page"  
 
 layoutNotFound :: Augmented () -> Html
 layoutNotFound w = layoutCommon w inner
@@ -253,10 +308,11 @@ urlConcat base ('/':xs) = expose base ++ xs
 urlConcat base xs       = expose base ++ xs
 
 -- | Renders the RSS feed.
-renderFeed :: BaseURL -> [M.RssEntry] -> String
-renderFeed base items = showXML $ rssToXML feed
+renderFeed :: C.ConfigSRV -> [M.RssEntry] -> String
+renderFeed w items = showXML $ rssToXML feed
     where
-        feed = RSS  "The Antiblog"
+        base = C.baseUrl w
+        feed = RSS  (expose $ C.siteTitle w)
                     (fromJust $ parseURI $ expose base)
                     "/dev/brain >> /dev/null"
                     []
@@ -272,10 +328,10 @@ renderFeed base items = showXML $ rssToXML feed
         convertTitle ti = [Title ti]
 
 
-renderEntry :: Augmented M.PagedEntry -> Text
+renderEntry :: Augmented SingleEntry -> Text
 renderEntry = renderHtml . layoutEntry
 
-renderPage :: Augmented M.Page -> Text
+renderPage :: Augmented Page -> Text
 renderPage = renderHtml . layoutPage
 
 renderNotFound :: Augmented () -> Text

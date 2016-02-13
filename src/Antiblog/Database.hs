@@ -6,12 +6,12 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 -- | Contains database-related logic.
-module Database where
+module Antiblog.Database where
 
 import Control.Applicative((<$>), (<*>))
 import Control.Monad(liftM, liftM2)
 import Data.ByteString.Char8(pack)
-import Data.Maybe(fromMaybe, listToMaybe)
+import Data.Maybe(fromMaybe)
 import Data.Pool(Pool, createPool, withResource)
 import Data.String(IsString, fromString)
 import Database.PostgreSQL.Simple
@@ -21,9 +21,11 @@ import Database.PostgreSQL.Simple.ToField
 
 import qualified Data.Text.Lazy as T
 
-import Api
-import Model
-import Utils
+import Anticore.Api
+import Anticore.Model
+import Anticore.Utils
+
+import qualified Antiblog.Model as M
 
 deriving instance FromField Summary
 deriving instance FromField Body
@@ -36,11 +38,11 @@ deriving instance ToField Title
 deriving instance ToField Symlink
 deriving instance ToField Metalink
 
-instance IsString PageKind where
-    fromString "list"       = Normal
-    fromString "entry"      = Normal
-    fromString "list.meta"  = Meta
-    fromString "entry.meta" = Meta
+instance IsString M.PageKind where
+    fromString "list"       = M.Normal
+    fromString "entry"      = M.Normal
+    fromString "list.meta"  = M.Meta
+    fromString "entry.meta" = M.Meta
     fromString x            = error $ "Unsupported tag: " ++ x
 
 instance FromField Tags where
@@ -67,7 +69,7 @@ fetch :: (ToRow a, FromRow b) => PoolT -> a -> Query -> IO [b]
 fetch pool args sql = withResource pool retrieve
     where retrieve conn = query conn sql args
 
-instance FromRow (PagedEntry) where
+instance FromRow (M.PagedEntryData) where
     fromRow = do
         uid      <- field
         kind     <- field
@@ -78,42 +80,61 @@ instance FromRow (PagedEntry) where
         symlink  <- field
         metalink <- field
         tags     <- field
-        return PagedEntry {
-            entry = Entry {
-                uid      = uid,
-                title    = title,
-                body     = content,
-                symlink  = symlink,
-                metalink = metalink,
-                summary  = summary,
-                md5sig   = (),
-                tags     = fromMaybe (Tags []) tags
-            },
-            readMore = more,
-            pageKind = fromString kind
-        }
+        let entryData = Entry
+                { uid      = uid
+                , title    = title
+                , body     = content
+                , symlink  = symlink
+                , metalink = metalink
+                , summary  = summary
+                , tags     = fromMaybe (Tags []) tags
+                , extra    = fromString kind
+                }
+        let extra = more
+        return $ M.PED entryData extra
 
 -- | Retrieves a list of entries to show at particular URL.
-fetchEntries :: PoolT -> String -> IO [PagedEntry]
+fetchEntries :: PoolT -> String -> IO [M.PagedEntryData]
 fetchEntries p href = fetch p (Only href)
     "SELECT entry_id, kind, title, content, teaser,\
     \read_more, symlink, metalink, \"tags\" \
     \FROM page_display WHERE href = ? ORDER BY page_index"
         
 -- | Retrieves a page to show at particular URL.
-fetchPage :: PoolT -> String -> IO Page
+fetchPage :: PoolT -> String -> IO M.Page
 fetchPage p href = liftM2 mix entries extra
     where
         entries = fetchEntries p href
         extra   = fetch p (Only href)
             "SELECT previous, next FROM previous_next WHERE href = ?"
-        mix as ((a,b):_) = Page as href a b
-        mix as []        = Page as href Nothing Nothing
+        mix as ((a,b):_) = M.Page as href a b
+        mix as []        = M.Page as href Nothing Nothing
 
 -- | Retrieves a single entry at particular URL or 'Nothing' if
 --   no matching entry found.
-fetchEntry :: PoolT -> String -> IO (Maybe PagedEntry)
-fetchEntry p h = fetchEntries p h |>> listToMaybe
+fetchEntry :: PoolT -> String -> IO (Maybe M.SingleEntry)
+fetchEntry p href = fetchEntries p href >>= complement
+    where
+        complement [] = return Nothing
+        complement (e:_) = do
+            let ed = M.unbox e
+            sls <- fetchSeries p $ uid ed
+            return $ Just $ M.SE ed sls
+
+instance FromRow M.SeriesLinks where
+    fromRow = do
+        a <- field
+        b <- field
+        c <- field
+        d <- field
+        return $ M.SL a b c d
+    
+
+fetchSeries :: PoolT -> Int -> IO [M.SeriesLinks]
+fetchSeries p id = fetch p (Only id)
+    "SELECT first_entry_link, prev_entry_link, next_entry_link,\
+    \last_entry_link \
+    \FROM series_links WHERE entry_id = ?"
 
 -- | Retrieves an URL to a random entry.
 fetchRandom :: PoolT -> IO String
@@ -150,10 +171,12 @@ fetchEntryIndex p = fetchSimple p
     "SELECT id, md5_signature FROM entry"
 
 -- | Records optional data (symlinks, tags) of an entry.
-recordOptionalData :: Connection -> EntryRQ a -> Int -> IO DBVoid
-recordOptionalData conn e uid = recordTags >> recordSymlinks
+recordOptionalData :: Connection -> EntryQuery a -> Int -> IO DBVoid
+recordOptionalData conn e uid =
+        recordTags >> recordSeries >> recordSymlinks
     where
         (Tags ts)      = tags e
+        (Series series) = seriesRef e
         resetTags      = execute conn
             "DELETE FROM entry_tag WHERE entry_id = ?"
             (Only uid)
@@ -161,12 +184,21 @@ recordOptionalData conn e uid = recordTags >> recordSymlinks
             "INSERT INTO entry_tag(entry_id, tag) VALUES (?, ?)"
             (uid, t::String)
         recordTags     = resetTags >> mapM_ insertTag ts
+        recordSymlinks :: IO DBVoid
         recordSymlinks = query conn
             "SELECT assign_symlinks(?, ?, ?)"
             (uid, symlink e, metalink e)
+        resetSeries    = execute conn
+            "DELETE FROM series_assignment WHERE entry_id = ?"
+            (Only uid)
+        insertSeries (SeriesRef s ix) = execute conn
+            "INSERT INTO series_assignment(entry_id, series, index) \
+            \VALUES (?, ?, ?)"
+            (uid, s, ix)
+        recordSeries   = resetSeries >> mapM_ insertSeries series
 
 -- | Updates an entry.
-updateEntry :: PoolT -> EntryUP -> IO ReplyUP
+updateEntry :: PoolT -> QueryUP -> IO ReplyUP
 updateEntry p e = withResource p (\conn -> do
     query conn
           "SELECT update_entry(?, ?, ?, ?, ?)"
@@ -175,7 +207,7 @@ updateEntry p e = withResource p (\conn -> do
     return $ AM ())
 
 -- | Creates a new entry and returns an assigned ID.
-createEntry :: PoolT -> EntryCR -> IO ReplyCR
+createEntry :: PoolT -> QueryCR -> IO ReplyCR
 createEntry p e = withResource p (\conn -> do
     rs <- query conn
                 "SELECT create_entry(?, ?, ?, ?)"
@@ -186,13 +218,17 @@ createEntry p e = withResource p (\conn -> do
     recordOptionalData conn e uid
     return $ AM uid)
 
+promoteEntry :: PoolT -> Int -> IO ReplyPR
+promoteEntry p uid = withResource p (\conn -> do
+    query conn
+          "SELECT promote_entry(?)"
+          (Only uid) :: IO DBVoid
+    return $ AM ())
+
 instance FromRow TagUsage where
     fromRow = TagUsage <$> field <*> field
 
 -- | Retrieves the list of entries in RSS feed.
 fetchTagCloud :: PoolT -> IO [TagUsage]
 fetchTagCloud p = fetchSimple p
-    "SELECT tag, count(1)::integer AS counter \
-    \FROM effective_entry_tag                 \
-    \GROUP BY tag                             \
-    \ORDER BY counter DESC"
+    "SELECT tag, counter FROM known_tag"

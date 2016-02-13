@@ -6,7 +6,5 @@ dist
 .cabal-sandbox
 .com.apple*
 config.json
-antiblog
-antisync
 cabal.sandbox.config
 

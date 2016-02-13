@@ -1,11 +1,12 @@
 -- | Data model.
 
-module Model where
+module Anticore.Model where
 
 import Data.List(intercalate)
 import Data.List.Split(splitOn)
 import Data.Time.Clock
-import Utils
+
+import Anticore.Utils
 
 -- | Wrapper type for entry title.
 newtype Title    = Title String deriving Show

@@ -27,7 +27,7 @@
 and it should be located at `~/.antisync/config.json`.
 -}
 
-module Antisync.ClientConfig where
+module Antisync.Config where
 
 import Control.Applicative
 import Control.Monad(mzero,liftM)
@@ -36,8 +36,8 @@ import Data.List(find)
 import Data.String
 import qualified Data.Text as T
 
-import Anticommon.Config
-import Utils
+import Anticore.Config
+import Anticore.Utils
 
 -- | Typesafe wrapper around the name of the system.
 newtype SystemName = SystemName String deriving Show

@@ -96,16 +96,17 @@
 --
 
 
-module Parser where
+module Antisync.Parser where
 
 import Data.Hash.MD5
 import Control.Monad(foldM)
 import Data.List(intercalate)
 import Data.String.Utils(strip)
 
-import Antisync.ClientConfig(SystemName)
-import qualified Model as M
-import Utils
+import qualified Anticore.Model as M
+import Anticore.Utils
+
+import Antisync.Config(SystemName)
 
 -- | Current state of the parser that specifies what kind of
 --   text is the current non-command line as well as what state
@@ -152,6 +153,7 @@ data Parser = P {
     , symlink   :: Maybe M.Symlink
     , metalink  :: Maybe M.Metalink
     , tags      :: M.Tags
+    , series    :: [M.SeriesRef]
 }
 
 -- | Initializes a new parser.
@@ -168,6 +170,7 @@ mk sys = P {
     , symlink   = Nothing
     , metalink  = Nothing
     , tags      = M.Tags []
+    , series    = []
 }
 
 trimWhite :: [BodyLine] -> [BodyLine]
@@ -201,6 +204,7 @@ signature e = md5s $ Str $ concatMap (\f -> f e)
         , maybe "" expose . symlink
         , maybe "" expose . metalink
         ,          expose . tags
+        , concatMap encode . series
         ]
 
 -- | Final stage of parsing, convert parser state into an `EntryFS`.
@@ -209,14 +213,14 @@ buildFS p
     | not $ publish p       = Skip "Not for publishing"
     | null $ expose content = Fail "Body is missing"
     | otherwise             = OK M.Entry {
-              M.title    = title p
-            , M.summary  = summary p
-            , M.uid      = uid p
-            , M.body     = content
-            , M.symlink  = symlink p
-            , M.metalink = metalink p
-            , M.md5sig   = signature p
-            , M.tags     = tags p
+              M.title     = title p
+            , M.summary   = summary p
+            , M.uid       = uid p
+            , M.body      = content
+            , M.symlink   = symlink p
+            , M.metalink  = metalink p
+            , M.tags      = tags p
+            , M.extra     = M.TREX (signature p) (M.Series $ series p)
             }
   where
       content = fullbody p
@@ -300,6 +304,11 @@ startCode p = OK p  { body  = Newline:Raw "<pre>":body p
                     , state = Code
                     }
 
+addSeries :: Parser -> String -> Int -> Processed Parser
+addSeries p s ix = OK $ p {
+        series = M.SeriesRef s ix : series p
+    }
+
 -- | Parses a single line of the text.
 parseLine :: Parser -> String -> Processed Parser
 parseLine p line =
@@ -311,9 +320,9 @@ parseLine p line =
         impl ["public", env, _] | env /= expose (system p) =
             OK p
         impl ["public", _, index] =
-            case reads index of
-                 [(num, "")] -> OK $ p { uid = Just num }
-                 _           -> Fail $ "Bad ID: " ++ index
+            case readInt index of
+                 Just num -> OK $ p { uid = Just num }
+                 _        -> Fail $ "Bad ID: " ++ index
         impl ["symlink", link] =
             OK p { symlink = Just $ wrap link }
         impl ["meta", link] =
@@ -334,6 +343,10 @@ parseLine p line =
             startCode p
         impl ["poem"] =
             OK p { state = Poem }
+        impl ["series", name, index] =
+             case readInt index of
+                  Just num -> addSeries p name num
+                  _        -> Fail $ "Bad series index: " ++ index
         impl _ = Fail $ "Unknown directive: " ++ line
     in case words line of
          ("##":"antiblog":rest) -> impl rest

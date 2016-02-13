@@ -20,13 +20,14 @@ import System.IO.Strict(hGetContents)
 import System.IO.UTF8(hPutStr)
 import System.Posix (fileSize, getFileStatus)
 
+import Anticore.Api
+import Anticore.Model
+import Anticore.Utils
+
 import Antisync.ApiClient
-import Antisync.ClientCmdLine
+import Antisync.CmdLine
 import Antisync.Config
 import Antisync.Parser(parseText)
-import Api
-import Model
-import Utils
 
 -- | Reads and parses a file.
 loadFile :: SystemName -> FilePath -> IO (Processed EntryFS)

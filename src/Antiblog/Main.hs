@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Entrypoint module of `antiblog` executable.
-module Main(main) where
+module Antiblog.Main(main) where
 
 import Control.Exception.Base(throw, PatternMatchFail(PatternMatchFail))
 import Control.Monad(liftM,liftM2,when)
@@ -11,14 +11,15 @@ import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Data.Text.Lazy as T
 import Network.HTTP.Types.Status(forbidden403, notFound404)
 import System.Environment(getArgs)
-import Web.Scotty
+import Web.Scotty hiding (body)
 
-import Api
-import Antiblog.ServerConfig
+import Anticore.Api
+import Anticore.Model
+import Anticore.Utils
+
+import Antiblog.Config
 import Antiblog.Database
 import Antiblog.Layout hiding (baseUrl,tags,title,summary)
-import Model
-import Utils
 
 getNotFound :: PoolT -> ConfigSRV -> IO T.Text
 getNotFound db cfg = augm |>> renderNotFound
@@ -116,16 +117,16 @@ decodeEntry muid = do
     summary  <- mparam "summary"
     tags     <- defparam "" "tags"
     series   <- encparam (Series []) "series"
-    return Entry {
-        title      = wrap title,
-        Model.body = wrap body,
-        symlink    = fmap wrap symlink,
-        metalink   = fmap wrap metalink,
-        uid        = uid,
-        summary    = fmap wrap summary,
-        tags       = wrap tags,
-        extra      = TREX md5sig series
-    }
+    return Entry
+        {title    = wrap title
+        ,body     = wrap body
+        ,symlink  = fmap wrap symlink
+        ,metalink = fmap wrap metalink
+        ,uid      = uid
+        ,summary  = fmap wrap summary
+        ,tags     = wrap tags
+        ,extra    = TREX md5sig series
+        }
 
 decodeEntryPromote :: ActionM Int
 decodeEntryPromote = param "id"

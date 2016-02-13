@@ -1,6 +1,6 @@
 
 -- | Entrypoint module of `antisync` utility.
-module Antisync.ClientCmdLine
+module Antisync.CmdLine
     ( Verbosity(Normal,Verbose,VeryVerbose)
     , ActionType(
          Status
@@ -18,8 +18,10 @@ module Antisync.ClientCmdLine
 where
 
 import System.Console.CmdArgs.Explicit
+
+import Anticore.Utils
+
 import Antisync.Config(SystemName)
-import Utils
 
 -- | Verbosity level.
 data Verbosity = 

@@ -4,7 +4,7 @@
 --
 --   All API calls need `ConfigCLI` structure to 
 
-module ApiClient where
+module Antisync.ApiClient where
 
 import Control.Arrow((***))
 import Control.Exception(catch)
@@ -20,10 +20,12 @@ import Network.HTTP.Client
 import Network.HTTP.Types.Header
 import Network.HTTP.Types.Status
 
-import Antisync.ClientConfig
-import Api
-import Model
-import Utils
+import Anticore.Api
+import Anticore.Model
+import Anticore.Utils hiding (encode)
+import qualified Anticore.Utils as U
+
+import Antisync.Config
 
 -- | Picks headers with specific name from a header list.
 fetchHeaders :: String -> ResponseHeaders -> [String]
@@ -94,6 +96,7 @@ encode e = mapMaybe wrap optionals ++ mandatories
             [ ("signature", md5sig e)
             , ("body",      expose $ body e)
             , ("tags",      expose $ tags e)
+            , ("series",    U.encode $ seriesRef e)
             ]
 
 -- | Updates an entry.
@@ -103,3 +106,9 @@ updateEntry sys e = mkPostRequest "update" sys (encode e) >>= query
 -- | Creates an entry, returning new entry's ID on success.
 createEntry :: Endpoint -> EntryFS -> IOProc ReplyCR
 createEntry sys e = mkPostRequest "create" sys (encode e) >>= query
+
+promoteEntry :: Endpoint -> Int -> IOProc ReplyPR
+promoteEntry sys uid = mkPostRequest "promote" sys params >>= query
+    where
+        params = [("id", show uid)]
+

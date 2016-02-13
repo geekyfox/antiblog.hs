@@ -2,15 +2,15 @@
 
 -- | Data model of client-server API.
 
-module Api where
+module Anticore.Api where
 
 import Control.Monad(mzero)
 import Data.Aeson
 import Data.ByteString(ByteString)
 import Data.ByteString.Lazy(fromChunks)
 
-import Model
-import Utils
+import Anticore.Model
+import Anticore.Utils
 
 -- | Skeleton type for a single blog entry in different contexts.
 type EntryQuery a = Entry a (Maybe Summary) Title TransportExtra

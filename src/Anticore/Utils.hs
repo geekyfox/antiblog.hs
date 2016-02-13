@@ -1,7 +1,7 @@
 
 -- | Various utility functions.
 
-module Utils where
+module Anticore.Utils where
 
 import Control.Monad(liftM)
 import Data.String(IsString,fromString)
