@@ -6,13 +6,18 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 -- | Contains database-related logic.
-module Antiblog.Database where
+module Antiblog.Database
+       ( module Antiblog.Database
+       , module Antihost.Database
+       )
+where
 
 import Control.Applicative((<$>), (<*>))
 import Control.Monad(liftM, liftM2)
-import Data.ByteString.Char8(pack)
-import Data.Maybe(fromMaybe)
-import Data.Pool(Pool, createPool, withResource)
+-- import Data.ByteString.Char8(pack)
+import Data.Maybe(fromMaybe,listToMaybe)
+--import Data.Pool(createPool, withResource)
+import Data.Pool(withResource)
 import Data.String(IsString, fromString)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
@@ -21,9 +26,13 @@ import Database.PostgreSQL.Simple.ToField
 
 import qualified Data.Text.Lazy as T
 
+import System.Random(randomRIO)
+
 import Anticore.Api
 import Anticore.Model
 import Anticore.Utils
+
+import Antihost.Database
 
 import qualified Antiblog.Model as M
 
@@ -47,27 +56,6 @@ instance IsString M.PageKind where
 
 instance FromField Tags where
     fromField f m = liftM wrap $ fromField f m
-
--- | Shorthand type name for a pool of PostgreSQL connections.
-type PoolT = Pool Connection
-
--- | Shorthand type name for resultsets of void-typed stored
---   procedures.
-type DBVoid = [Only ()]
-
--- | Creates a connection pool with a given connstring.
-mkPool :: String -> IO PoolT
-mkPool cs = createPool (connectPostgreSQL $ pack cs) close 1 30 10
-
--- | Utility function for queries without arguments.
-fetchSimple :: (FromRow a) => PoolT -> Query -> IO [a]
-fetchSimple pool sql = withResource pool retrieve
-    where retrieve conn = query_ conn sql
-
--- | Utility function for queries with arguments.
-fetch :: (ToRow a, FromRow b) => PoolT -> a -> Query -> IO [b]
-fetch pool args sql = withResource pool retrieve
-    where retrieve conn = query conn sql args
 
 instance FromRow (M.PagedEntryData) where
     fromRow = do
@@ -93,33 +81,17 @@ instance FromRow (M.PagedEntryData) where
         let extra = more
         return $ M.PED entryData extra
 
--- | Retrieves a list of entries to show at particular URL.
-fetchEntries :: PoolT -> String -> IO [M.PagedEntryData]
-fetchEntries p href = fetch p (Only href)
-    "SELECT entry_id, kind, title, content, teaser,\
-    \read_more, symlink, metalink, \"tags\" \
-    \FROM page_display WHERE href = ? ORDER BY page_index"
-        
--- | Retrieves a page to show at particular URL.
-fetchPage :: PoolT -> String -> IO M.Page
-fetchPage p href = liftM2 mix entries extra
-    where
-        entries = fetchEntries p href
-        extra   = fetch p (Only href)
-            "SELECT previous, next FROM previous_next WHERE href = ?"
-        mix as ((a,b):_) = M.Page as href a b
-        mix as []        = M.Page as href Nothing Nothing
+mkHref :: M.Index -> Maybe String -> String
+mkHref a b = show (a, b)
 
--- | Retrieves a single entry at particular URL or 'Nothing' if
---   no matching entry found.
-fetchEntry :: PoolT -> String -> IO (Maybe M.SingleEntry)
-fetchEntry p href = fetchEntries p href >>= complement
+-- | Retrieves a page to show at particular URL.
+fetchPage :: PoolT -> M.Index -> Maybe String -> IO M.Page
+fetchPage p ix mtag = withResource p go
     where
-        complement [] = return Nothing
-        complement (e:_) = do
-            let ed = M.unbox e
-            sls <- fetchSeries p $ uid ed
-            return $ Just $ M.SE ed sls
+        go c = liftM2 mix (entries c) (extra c)
+        entries c = fetchEntries c ix mtag
+        extra   c = fetchPreviousNext c ix mtag
+        mix as (a,b) = M.Page as (mkHref ix mtag) a b
 
 instance FromRow M.SeriesLinks where
     fromRow = do
@@ -128,25 +100,16 @@ instance FromRow M.SeriesLinks where
         c <- field
         d <- field
         return $ M.SL a b c d
-    
-
-fetchSeries :: PoolT -> Int -> IO [M.SeriesLinks]
-fetchSeries p id = fetch p (Only id)
-    "SELECT first_entry_link, prev_entry_link, next_entry_link,\
-    \last_entry_link \
-    \FROM series_links WHERE entry_id = ?"
 
 -- | Retrieves an URL to a random entry.
 fetchRandom :: PoolT -> IO String
-fetchRandom p = fetchSimple p "SELECT random_entry()"
-                |>> (head . head)
-
--- | Retrieves an URL to a random entry that is guaranteed to not be
---   same as mentioned one (`Text` argument is supposed to be
---   Http-Referer header).
-fetchRandomExcept :: PoolT -> T.Text -> IO String
-fetchRandomExcept p ref = fetch p (Only ref) "SELECT random_entry(?)"
-                          |>> (head . head)
+fetchRandom p = withResource p go
+    where
+        go c = do
+            rs <- query_ c "SELECT id FROM entry ORDER BY random() LIMIT 1"
+            case listToMaybe rs of
+                 Nothing -> return "/"
+                 Just (Only n) -> formatEntryLink c n
 
 instance FromRow RssEntry where
     fromRow = Rss <$> field <*> field <*> field 
@@ -154,13 +117,18 @@ instance FromRow RssEntry where
 
 -- | Retrieves the list of entries in RSS feed.
 fetchFeed :: PoolT -> IO [RssEntry]
-fetchFeed p = fetchSimple p
-    "SELECT e.id, e.title, e.teaser, e.md5_signature, \
-    \       re.date_posted AS pubtime,                \
-    \       format_entry_link(e.id) AS permalink      \
-    \FROM entry e, rss_entry re                       \
-    \WHERE e.id = re.entry_id                         \
-    \ORDER BY re.date_posted DESC"
+fetchFeed p = withResource p go
+    where
+        go c = get c >>= mapM (decorate c)
+        get c = query_ c
+            "SELECT e.id, e.title, e.teaser, e.md5_signature, \
+            \       re.date_posted AS pubtime                 \
+            \FROM entry e, rss_entry re                       \
+            \WHERE e.id = re.entry_id                         \
+            \ORDER BY re.date_posted DESC"
+        decorate c (uid, p, q, r, s) = do
+            href <- formatEntryLink c uid
+            return (Rss uid p q r s href)
 
 instance FromRow EntryHash where
     fromRow = EHash <$> field <*> field
@@ -170,8 +138,23 @@ fetchEntryIndex :: PoolT -> IO [EntryHash]
 fetchEntryIndex p = fetchSimple p
     "SELECT id, md5_signature FROM entry"
 
+assignSymlinks :: Connection -> Int -> Maybe Symlink -> Maybe Metalink -> IO ()
+assignSymlinks c uid sl ml = clear >> addSym sl >> addMeta ml
+    where
+        clear = execute c "DELETE FROM symlink WHERE entry_id = ?" (Only uid)
+        addSym Nothing = return ()
+        addSym (Just x) = do
+            execute c "DELETE FROM symlink WHERE link = ? AND kind = 'normal'" (Only x)
+            execute c "INSERT INTO symlink(link, kind, entry_id) VALUES(?, 'normal', ?)" (x, uid)
+            return ()
+        addMeta Nothing = return ()
+        addMeta (Just x) = do
+            execute c "DELETE FROM symlink WHERE link = ? AND kind = 'meta'" (Only x)
+            execute c "INSERT INTO symlink(link, kind, entry_id) VALUES(?, 'meta', ?)" (x, uid)
+            return ()
+
 -- | Records optional data (symlinks, tags) of an entry.
-recordOptionalData :: Connection -> EntryQuery a -> Int -> IO DBVoid
+recordOptionalData :: Connection -> EntryQuery a -> Int -> IO ()
 recordOptionalData conn e uid =
         recordTags >> recordSeries >> recordSymlinks
     where
@@ -184,10 +167,7 @@ recordOptionalData conn e uid =
             "INSERT INTO entry_tag(entry_id, tag) VALUES (?, ?)"
             (uid, t::String)
         recordTags     = resetTags >> mapM_ insertTag ts
-        recordSymlinks :: IO DBVoid
-        recordSymlinks = query conn
-            "SELECT assign_symlinks(?, ?, ?)"
-            (uid, symlink e, metalink e)
+        recordSymlinks = assignSymlinks conn uid (symlink e) (metalink e)
         resetSeries    = execute conn
             "DELETE FROM series_assignment WHERE entry_id = ?"
             (Only uid)
@@ -200,35 +180,59 @@ recordOptionalData conn e uid =
 -- | Updates an entry.
 updateEntry :: PoolT -> QueryUP -> IO ReplyUP
 updateEntry p e = withResource p (\conn -> do
-    query conn
-          "SELECT update_entry(?, ?, ?, ?, ?)"
-          (uid e, title e, body e, summary e, md5sig e) :: IO DBVoid
-    recordOptionalData conn e (uid e)
+    updateEntryImpl conn (uid e) e
     return $ AM ())
+    
+updateEntryImpl :: Connection -> Int -> EntryQuery a -> IO ()
+updateEntryImpl conn uid e = do
+    execute conn "UPDATE entry SET title = ? \
+                 \               , teaser = ? \
+                 \               , body = ?   \
+                 \               , read_more = ? \
+                 \               , invisible = FALSE \
+                 \               , md5_signature = ? \
+                 \WHERE id = ?"
+                 (title e, ts, body e, rm, md5sig e, uid)
+    recordOptionalData conn e uid
+  where
+      (ts, rm) = case summary e of
+                      Just s -> (s, True)
+                      Nothing -> let (p, q) = trim $ expose $ body e in (wrap p, q)
+      trim s | length s < 600 = (s, False)
+             | otherwise = let x = reverse $ take 600 s
+                               y = reverse $ skip ' ' x
+                               z = reverse $ skip '\n' x
+                           in (if length y > length z then y else z, True)
+      skip _ [] = []
+      skip y (x:xs) | x == y = xs | otherwise = skip y xs
+
+-- select id from (select round(random() * 9000000 + 1000000) id from generate_series(1,1000)) sq where not exists (select 1 from entry e where e.id = sq.id)
 
 -- | Creates a new entry and returns an assigned ID.
 createEntry :: PoolT -> QueryCR -> IO ReplyCR
 createEntry p e = withResource p (\conn -> do
-    rs <- query conn
-                "SELECT create_entry(?, ?, ?, ?)"
-                (title e, body e, summary e, md5sig e)
-    let uid = case rs of
-                   [Only x] -> x
-                   _ -> error $ "Weird result set: " ++ show rs
-    recordOptionalData conn e uid
-    return $ AM uid)
+    [(Only uid)] <- query_ conn
+                           "SELECT id FROM (      \
+                           \   SELECT ROUND(RANDOM() * 9000000 + 1000000)::INT id \
+                           \   FROM generate_series(1,100) \
+                           \) sq WHERE NOT EXISTS ( \
+                           \   SELECT 1 FROM entry e \
+                           \   WHERE e.id = sq.id \
+                           \) LIMIT 1"
 
-promoteEntry :: PoolT -> Int -> IO ReplyPR
-promoteEntry p uid = withResource p (\conn -> do
-    query conn
-          "SELECT promote_entry(?)"
-          (Only uid) :: IO DBVoid
-    return $ AM ())
+    [(Only mmx)] <- query_ conn "SELECT MAX(rank) FROM entry"
+    rank <- case mmx of
+                 Nothing -> return 1
+                 Just n -> do
+                     rank <- randomRIO (1, n + 1)
+                     slideEntryRanks conn rank
+                     return rank
+    execute conn "INSERT INTO entry \
+                 \(id, title, teaser, body, read_more, invisible, rank, md5_signature) \
+                 \VALUES (?, '', '', '', FALSE, TRUE, ?, '')"
+                 (uid, rank)
+    updateEntryImpl conn uid e
+    return $ AM uid)
 
 instance FromRow TagUsage where
     fromRow = TagUsage <$> field <*> field
-
--- | Retrieves the list of entries in RSS feed.
-fetchTagCloud :: PoolT -> IO [TagUsage]
-fetchTagCloud p = fetchSimple p
-    "SELECT tag, counter FROM known_tag"

@@ -15,7 +15,7 @@
 }
 @
 -}
-module Antiblog.Config where
+module Antihost.Config where
 
 import Control.Applicative
 import Control.Monad(mzero,liftM)

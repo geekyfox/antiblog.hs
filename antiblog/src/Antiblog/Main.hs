@@ -11,13 +11,17 @@ import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Data.Text.Lazy as T
 import Network.HTTP.Types.Status(forbidden403, notFound404)
 import System.Environment(getArgs)
+import System.IO
 import Web.Scotty hiding (body)
 
 import Anticore.Api
 import Anticore.Model
 import Anticore.Utils
 
-import Antiblog.Config
+import Antihost.Database
+import Antihost.Model
+
+import Antihost.Config
 import Antiblog.Database
 import Antiblog.Layout hiding (baseUrl,tags,title,summary)
 
@@ -28,10 +32,10 @@ getNotFound db cfg = augm |>> renderNotFound
         augm = liftM (\ts -> comprise cfg ts ()) tags
 
 -- | Provides an entry page at given URL.
-getEntry :: PoolT -> ConfigSRV -> String -> IO T.Text
-getEntry db cfg href = entry >>= maybe notFound render
+getEntry :: PoolT -> ConfigSRV -> String -> PageKind -> IO T.Text
+getEntry db cfg uid pk = entry >>= maybe notFound render
     where
-        entry    = fetchEntry db href
+        entry    = fetchEntry db uid pk
         tags     = fetchTagCloud db
         notFound = getNotFound db cfg
         render e = tags |>> combine |>> renderEntry
@@ -39,10 +43,10 @@ getEntry db cfg href = entry >>= maybe notFound render
                 combine ts = comprise cfg ts e
 
 -- | Provides a list page at given URL.
-getPage :: PoolT -> ConfigSRV -> String -> IO T.Text
-getPage db cfg href = augm |>> renderPage
+getPage :: PoolT -> ConfigSRV -> Index -> Maybe String -> IO T.Text
+getPage db cfg ix mtag = augm |>> renderPage
     where
-        page = fetchPage db href
+        page = fetchPage db ix mtag
         tags = fetchTagCloud db
         augm = liftM2 (comprise cfg) tags page
         
@@ -53,13 +57,8 @@ getFeed db cfg = liftM render $ fetchFeed db
         render = renderFeed cfg
 
 -- | Provides a random link.
-getRandom :: PoolT -> ConfigSRV -> Maybe T.Text -> IO T.Text
-getRandom db cfg ref = link |>> urlConcat base |>> T.pack
-    where
-        base = baseUrl cfg
-        link = case ref of
-            Just r  -> fetchRandomExcept db r
-            Nothing -> fetchRandom db
+getRandom :: PoolT -> ConfigSRV -> IO T.Text
+getRandom db cfg = fetchRandom db |>> urlConcat (baseUrl cfg) |>> T.pack
 
 mparam :: (Parsable a) => T.Text -> ActionM (Maybe a)
 mparam key = fmap Just (param key) `rescue` (\_ -> return Nothing)
@@ -135,24 +134,34 @@ decodeEntryPromote = param "id"
 webloop :: PoolT -> ConfigSRV -> IO ()
 webloop db sys =
     let
+        renderPage ix mtag = liftIO (getPage db sys ix mtag) >>= html
+        renderEntry ref pk = liftIO (getEntry db sys ref pk) >>= html
         invoke_ f        = liftIO (f db sys)
         invoke f arg     = liftIO (f db sys arg)
         htmlIO' f url    = invoke f url >>= html
         htmlIO f suf sub = htmlIO' f $ suf ++ sub
     in scotty (httpPort sys) $ do
         get "/entry/random" $
-            header "Referer" >>= invoke getRandom >>= redirect
-        get "/entry/:id" $
-            param "id" >>= htmlIO getEntry "/entry/"
-        get "/page/:id" $
-            param "id" >>= htmlIO getPage "/page/"
+            invoke_ getRandom >>= redirect
+        get "/entry/:id" $ do
+            ref <- param "id"
+            renderEntry ref Normal
+        get "/page/:id" $ do
+            (ix, mtag) <- (param "id") |>> parseRef
+            renderPage ix mtag
         get "/page/:tag/:id" $ do
+            mix <- param "id" |>> parseIndex
             tag <- param "tag"
-            param "id" >>= htmlIO getPage ("/page/" ++ tag ++ "/")            
+            case mix of
+                 Just ix -> renderPage ix (Just tag)
+                 Nothing -> invoke_ getNotFound >>= html
         get "/" $
-            htmlIO' getPage "/"
-        get "/meta/:id" $
-            param "id" >>= htmlIO getEntry "/meta/"
+            renderPage (Number 1) Nothing
+        get "/meta/:id" $ do
+            ref <- param "id"
+            case parseIndex ref of
+                 Just ix -> renderPage ix (Just "meta")
+                 Nothing -> renderEntry ref Meta
         get "/rss.xml" $ do
             setHeader "Content-Type" "text/xml"            
             invoke_ getFeed |>> C.pack >>= raw
@@ -170,7 +179,7 @@ webloop db sys =
         post "/api/promote" $ secure sys $ do
             uid <- decodeEntryPromote
             result <- liftIO (promoteEntry db uid)
-            json result
+            json $ AM result
         notFound $ do
             status notFound404
             invoke_ getNotFound >>= html
@@ -178,6 +187,7 @@ webloop db sys =
 -- | Entrypoint.
 main :: IO ()
 main = do
+    hSetBuffering stdout NoBuffering
     args <- getArgs
     when (length args /= 1) (error "Config file location is missing")
     sys <- serverConfig (head args)    

@@ -32,7 +32,7 @@ import Anticore.Config(BaseURL)
 import qualified Anticore.Model as M
 import Anticore.Utils
 
-import qualified Antiblog.Config as C
+import qualified Antihost.Config as C
 import Antiblog.Model
 
 data Augmented a = AUG {
@@ -261,14 +261,14 @@ layoutEntryBarebone w@AUG{baseUrl = base} ec =
         seriesLinksBlock =
             case seriesLinks ec of
                  Nothing -> return ()
-                 Just sl -> H.div ! class_ "series-links" $ do         
-                     sLink "First in series" $ linkFirst sl
+                 Just sl -> H.div ! class_ "series-links" $ do
+                     a ! mkref w (linkFirst sl) $ "First in series"
                      " | "
                      sLink "Previous" $ linkPrev sl
                      " | "
                      sLink "Next" $ linkNext sl
                      " | "
-                     sLink "Last in series" $ linkLast sl
+                     a ! mkref w (linkLast sl) $ "Last in series"
         sLink :: Html -> Maybe String -> Html
         sLink txt Nothing = txt
         sLink txt (Just v) = a ! mkref w v $ txt
