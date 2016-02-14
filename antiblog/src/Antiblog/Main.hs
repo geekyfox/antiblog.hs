@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Entrypoint module of `antiblog` executable.
-module Antiblog.Main(main) where
+module Main(main) where
 
 import Control.Exception.Base(throw, PatternMatchFail(PatternMatchFail))
 import Control.Monad(liftM,liftM2,when)

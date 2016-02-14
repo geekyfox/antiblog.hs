@@ -1,6 +1,17 @@
 
-build:
-	@cabal install
+build: antiblog/stamp antisync/stamp
+
+anticore/stamp: anticore/src/Anticore/*
+	cd anticore && cabal install
+	touch anticore/stamp
+
+antiblog/stamp: anticore/stamp antiblog/src/Antiblog/*
+	cd antiblog && cabal install
+	touch antiblog/stamp
+
+antisync/stamp: anticore/stamp antisync/src/Antisync/*
+	cd antisync && cabal install
+	touch antisync/stamp
 
 docs:
 	@cabal haddock --executables --haddock-options="--ignore-all-exports"
