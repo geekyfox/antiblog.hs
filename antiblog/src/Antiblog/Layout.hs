@@ -11,6 +11,7 @@
 
 module Antiblog.Layout where
 
+import Control.Applicative
 import Control.Monad(when, unless)
 import Data.String(IsString,fromString)
 import Data.Maybe(fromMaybe,listToMaybe,catMaybes,fromJust)
@@ -30,7 +31,7 @@ import Network.URI(parseURI)
 
 import Anticore.Config(BaseURL)
 import qualified Anticore.Model as M
-import Anticore.Utils
+import Anticore.Data.Tagged
 
 import qualified Antihost.Config as C
 import Antiblog.Model
@@ -144,8 +145,8 @@ permalink base entry = fromString $ urlConcat base preferred
         priority  = case pageKind entry of
                          Normal -> [symlink, metalink]
                          Meta   -> [metalink, symlink]
-        symlink   = M.symlink entry  |>> expose
-        metalink  = M.metalink entry |>> expose
+        symlink   = expose <$> M.symlink entry
+        metalink  = expose <$> M.metalink entry
 
 -- | Produces /<head/> part of HTML document.
 htmlHead :: Augmented a -> Html

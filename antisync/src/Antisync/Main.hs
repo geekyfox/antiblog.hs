@@ -4,9 +4,10 @@ module Main(main) where
 
 import Prelude hiding (lookup)
 
+import Control.Applicative
 import Control.Arrow(second)
 import Control.Concurrent(threadDelay)
-import Control.Monad(liftM, liftM2, filterM, join)
+import Control.Monad(liftM, liftM2, filterM)
 import Data.List(intercalate)
 import Data.Map(lookup)
 import Data.Maybe(isJust, isNothing, fromJust)
@@ -21,8 +22,10 @@ import System.IO.UTF8(hPutStr)
 import System.Posix (fileSize, getFileStatus)
 
 import Anticore.Api
+import Anticore.Control.Flip
+import Anticore.Data.Outcome
+import Anticore.Data.Tagged
 import Anticore.Model
-import Anticore.Utils
 
 import Antisync.ApiClient
 import Antisync.CmdLine
@@ -30,10 +33,10 @@ import Antisync.Config
 import Antisync.Parser(parseText)
 
 -- | Reads and parses a file.
-loadFile :: SystemName -> FilePath -> IO (Processed EntryFS)
+loadFile :: SystemName -> FilePath -> IO (Outcome EntryFS)
 loadFile sys fpath =  
     let
-        drain handle = hGetContents handle |>> lines |>> parseText sys
+        drain handle = parseText sys <$> lines <$> hGetContents handle
         openAndDrain = withBinaryFile fpath ReadMode drain
         retreat      = return $ Fail "File too big"
     in do
@@ -41,13 +44,13 @@ loadFile sys fpath =
         if fsize < 100000 then openAndDrain else retreat
 
 -- | Shorthand type for the result of reading multiple files.
-type DataFS = [(FilePath, Processed EntryFS)]
+type DataFS = [(FilePath, Outcome EntryFS)]
 
 -- | Reads and parses multiple files.
 loadFiles :: SystemName -> [FilePath] -> IO DataFS
 loadFiles sys = mapM parseOne
     where
-        parseOne name = loadFile sys name |>> (,) name
+        parseOne name = (,) name <$> loadFile sys name
 
 -- | Lookups files in directory.
 directoryScan :: FilePath -> IO [FilePath]
@@ -70,7 +73,7 @@ loadDir sys dir = directoryScan dir >>= loadFiles sys
 --
 --       * `Fail` : error occured
 --
-decideStatus :: EntryIndex -> EntryFS -> Processed String
+decideStatus :: EntryIndex -> EntryFS -> Outcome String
 decideStatus srv e
     | isNothing mfid  = OK "New entry"
     | isNothing mssig = Fail "No matching entry on server"
@@ -83,11 +86,11 @@ decideStatus srv e
         fsig  = md5sig e
 
 -- | Monad-ish version of `decideStatus`.
-decideStatusM :: EntryIndex -> Processed EntryFS -> Processed String
+decideStatusM :: EntryIndex -> Outcome EntryFS -> Outcome String
 decideStatusM ix pe = pe >>= decideStatus ix
 
 -- | Shorthand type for statuses of multiple files.
-type Status = Processed [(FilePath, Processed String)]
+type Status = Outcome [(FilePath, Outcome String)]
 
 -- | Reads file in the directory and decides their respective statuses.
 status :: FilePath -> Endpoint -> IO Status
@@ -121,25 +124,38 @@ injectId sys fpath id = load >>= save
         put c h = hPutStr h $ prefix ++ c
 
 -- | Synchronizes single file with remote server.
-syncOne :: Endpoint -> EntryIndex -> FilePath -> IO (Processed ())
-syncOne sys srv fp = loaded >>= liftProc work |>> join
+syncOne :: Endpoint -> EntryIndex -> FilePath -> IO (Outcome ())
+syncOne sys srv fp = submit <!!> approved
     where
-        approve pe = pe >>= (\e -> decideStatus srv e >> return e)
-        loaded     = loadFile (systemName sys) fp |>> approve
-        create e   = createEntry sys e |>> unfold
-                                       >>= liftProc (injectId sys fp)
-        work e
-          | isJust $ uid e = updateEntry sys e |>> unfold
-          | otherwise      = create e
-        unfold = fmap (\(AM x) -> x)
+        loaded, approved :: IO (Outcome EntryFS)
+        loaded = loadFile (systemName sys) fp
+        approved = promO approve <!!> loaded
+        approve :: EntryFS -> Outcome EntryFS
+        approve e = decideStatus srv e >> return e
+        save :: Int -> IO ()
+        save = injectId sys fp
+        submit :: EntryFS -> IO (Outcome ())
+        submit e
+          | isJust $ uid e = unfold <$$> updateEntry sys e
+          | otherwise = promI save <!!> unfold <$$> createEntry sys e
+        unfold (AM x) = x
 
 -- | Syncronizes a list of files. Reports progress at given
 --   `Verbosity`.
 sync :: Verbosity -> [FilePath] -> Endpoint -> IO ()
-sync v files sys = queryIndexAsMap sys >>= describeM work >>= putStr
+sync v files sys = msg >>= putStrLn
     where
-        work srv = mapM (workOne srv) files |>> concat
-        workOne srv fp = syncOne sys srv fp |>> report fp
+        msg :: IO String
+        msg = do
+            oix <- queryIndexAsMap sys
+            case toEither oix of
+                Left msg -> return msg
+                Right ix -> work ix
+        work :: EntryIndex -> IO String
+        work srv = concat <$> mapM (workOne srv) files
+        workOne :: EntryIndex -> FilePath -> IO String
+        workOne srv fp = report fp <$> syncOne sys srv fp
+        report :: FilePath -> Outcome a -> String
         report fp res
           | shouldIgnore v res = ""
           | otherwise = fp ++ " => " ++ describe (const "OK") res ++ "\n"
@@ -155,13 +171,15 @@ pump files sys =
 promote :: [FilePath] -> Endpoint -> IO ()
 promote files sys = mapM_ workOne files
     where
-        workOne f = simplify (perform f) >>= render f
-        perform f = loadFile (systemName sys) f
-                    |>> extractId
-                    |>> promoteOne
-        extractId = join . liftM (procMaybe "ID is missing" . uid)
-        promoteOne = liftM (promoteEntry sys)
-        simplify x = join (x |>> transpose |>> liftM join)
+        theFile :: FilePath -> IO (Outcome EntryFS)
+        theFile = loadFile (systemName sys)
+        workOne :: FilePath -> IO ()
+        workOne f = (process <!!> theFile f) >>= render f
+        process :: EntryFS -> IO (Outcome ReplyPR)
+        process x = reduceM (promoteEntry sys <$> extractId x)
+        extractId :: EntryFS -> Outcome Int
+        extractId = fromMaybe "ID is missing" . uid
+        render :: FilePath -> Outcome a -> IO ()
         render f p = putStrLn $ f ++ " => " ++ describe (const "OK") p
 
 main :: IO ()

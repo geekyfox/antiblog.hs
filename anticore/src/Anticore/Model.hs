@@ -6,7 +6,8 @@ import Data.List(intercalate)
 import Data.List.Split(splitOn)
 import Data.Time.Clock
 
-import Anticore.Utils
+import Anticore.Data.Outcome
+import Anticore.Data.Tagged
 
 -- | Wrapper type for entry title.
 newtype Title    = Title String deriving Show

@@ -19,7 +19,8 @@ where
 
 import System.Console.CmdArgs.Explicit
 
-import Anticore.Utils
+import Anticore.Data.Outcome
+import Anticore.Data.Tagged
 
 import Antisync.Config(SystemName)
 
@@ -33,7 +34,7 @@ data Verbosity =
     | VeryVerbose
 
 -- | Matches an entry against verbosity setting.
-shouldIgnore :: Verbosity -> Processed a -> Bool
+shouldIgnore :: Verbosity -> Outcome a -> Bool
 shouldIgnore Verbose (Skip "Not modified") = True
 shouldIgnore Normal  (Skip _)              = True
 shouldIgnore _       _                     = False

@@ -3,6 +3,7 @@
 
 module Antihost.Database where
 
+import Control.Applicative
 import Control.Monad(
         join
        )
@@ -25,10 +26,6 @@ import Database.PostgreSQL.Simple.FromField(
        )
        
 import GHC.Int
-
-import Anticore.Utils(
-        (|>>)
-       )
 
 import Anticore.Model
 import Antihost.Model
@@ -53,10 +50,10 @@ mutate c q r = do
     return ()
 
 oneRow_ :: (FromRow a) => Connection -> Query -> IO (Maybe a)
-oneRow_ c q = query_ c q |>> listToMaybe
+oneRow_ c q = listToMaybe <$> query_ c q
 
 oneField_ :: (FromField a) => Connection -> Query -> IO (Maybe a)
-oneField_ c q = oneRow_ c q |>> fmap fromOnly |>> join
+oneField_ c q = join <$> fmap fromOnly <$> oneRow_ c q
 
 -- | Creates a connection pool with a given connstring.
 mkPool :: String -> IO PoolT
@@ -96,7 +93,7 @@ slideFeedPosition c = get >>= mapM_ set
         set (Only uid) = execute c "UPDATE rss_entry SET feed_position = feed_position + 1 WHERE entry_id = ?" (Only uid)
 
 formatEntryLink :: Connection -> Int -> IO String
-formatEntryLink c uid = get |>> decide
+formatEntryLink c uid = decide <$> get
     where
         get = query c "SELECT link, kind FROM symlink WHERE entry_id = ?" (Only uid)
         decide :: [(String, String)] -> String
@@ -170,7 +167,7 @@ fetchSeries c uid = go c
             return (SL f p n l)
         fetch :: Connection -> [Int] -> IO (Maybe String)
         fetch _ [] = return Nothing
-        fetch c (i:_) = formatEntryLink c i |>> Just
+        fetch c (i:_) = Just <$> formatEntryLink c i
 
 decodePageHref :: String -> (Index, Maybe String)
 decodePageHref href = go $ splitOn "/" href
@@ -192,7 +189,7 @@ encodePageHref (Just v) n = "/page/" ++ v ++ "/" ++ show n
 fetchEntriesCount :: Connection -> Maybe String -> IO Int
 fetchEntriesCount c (Just "micro") = fetchMicroCount c
 fetchEntriesCount c (Just "meta") = fetchMetaCount c
-fetchEntriesCount c mtag = get mtag |>> (fromOnly . head)
+fetchEntriesCount c mtag = (fromOnly . head) <$> get mtag
     where
         get Nothing =
             query_ c "SELECT COUNT(1)::integer FROM entry"
@@ -228,22 +225,14 @@ fetchTagCloud p = withResource p go
         
 
 fetchMicroCount :: Connection -> IO Int
-fetchMicroCount c = get |>> (fromOnly . head)
+fetchMicroCount c = fromOnly <$> head <$> get
     where
         get = query_ c "SELECT COUNT(1)::integer FROM entry WHERE NOT read_more"
 
 fetchMetaCount :: Connection -> IO Int
-fetchMetaCount c = get |>> (fromOnly . head)
+fetchMetaCount c = fromOnly <$> head <$> get
     where
         get = query_ c "SELECT COUNT(1)::integer FROM symlink WHERE kind = 'meta'"
-{-
--- | Retrieves a list of entries to show at particular URL.
-fetchEntriesCompat :: PoolT -> String -> IO [PagedEntryData]
-fetchEntriesCompat p href = withResource p go
-    where
-        go c = let (ix, mtag) = decodePageHref href
-               in fetchEntries c ix mtag
--}
 
 fetchEntryIds :: Connection -> Index -> Maybe String -> IO [Only Int]
 fetchEntryIds c (Number n) mtag = fetchEntryIdsImpl c n mtag
@@ -297,8 +286,8 @@ fetchEntries c ix mtag = fetchEntryIds c ix mtag >>= retrieve
             tags <- fetchTagsFast c uid (not rm) (isJust ml)
             let entry = Entry {
                          body     = Body sm
-                        ,symlink  = sl |>> (\x -> Symlink $ "entry/" ++ x)
-                        ,metalink = ml |>> (\x -> Metalink $ "meta/" ++ x)
+                        ,symlink  = (\x -> Symlink $ "entry/" ++ x) <$> sl
+                        ,metalink = (\x -> Metalink $ "meta/" ++ x) <$> ml
                         ,tags     = Tags tags
                         ,uid      = uid
                         ,summary  = Summary sm
@@ -306,12 +295,6 @@ fetchEntries c ix mtag = fetchEntryIds c ix mtag >>= retrieve
                         ,extra    = if mtag == (Just "meta") then Meta else Normal
                         }
             return $ PED entry rm
-
-{-
-    "SELECT entry_id, kind, title, content, teaser,\
-    \read_more, symlink, metalink, \"tags\" \
-    \FROM page_display WHERE href = ? ORDER BY page_index"
--}      
 
 -- | Retrieves a single entry at particular URL or 'Nothing' if
 --   no matching entry found.
@@ -341,7 +324,7 @@ resolveMetalink c ref = do
     return $ listToMaybe $ map fromOnly rs
 
 fetchTagsFast :: Connection -> Int -> Bool -> Bool -> IO [String]
-fetchTagsFast c uid hasMicro hasMeta = go |>> decorate
+fetchTagsFast c uid hasMicro hasMeta = decorate <$> go
     where
         go = do
             rs <- query c "SELECT tag FROM entry_tag WHERE entry_id = ?" (Only uid)
@@ -366,8 +349,8 @@ fetchEntryById c uid = go c
                      tags <- fetchTagsFast c uid (not rm) (isJust ml)
                      let entry = Entry {
                          body     = Body bd
-                        ,symlink  = sl |>> (\x -> Symlink $ "entry/" ++ x)
-                        ,metalink = ml |>> (\x -> Metalink $ "meta/" ++ x)
+                        ,symlink  = (\x -> Symlink $ "entry/" ++ x) <$> sl
+                        ,metalink = (\x -> Metalink $ "meta/" ++ x) <$> ml
                         ,tags     = Tags tags
                         ,uid      = uid
                         ,summary  = Summary sm

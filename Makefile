@@ -1,11 +1,11 @@
 
 build: antiwork/stamp antiblog/stamp antisync/stamp
 
-anticore/stamp: anticore/src/Anticore/*
+anticore/stamp: anticore/src/Anticore/**/*hs
 	cd anticore && cabal install
 	touch anticore/stamp
 
-antihost/stamp: antihost/src/Antihost/*
+antihost/stamp: anticore/stamp antihost/src/Antihost/*
 	cd antihost && cabal install
 	touch antihost/stamp
 
@@ -21,6 +21,11 @@ antisync/stamp: anticore/stamp antisync/src/Antisync/*
 	cd antisync && cabal install
 	touch antisync/stamp
 
+clean-libs:
+	cabal sandbox hc-pkg unregister antihost-0.1.0.1
+	rm -f antihost/stamp
+	cabal sandbox hc-pkg unregister anticore-0.1.0.1
+	rm -f anticore/stamp
 
 lint:
 	@hlint anticore/src antihost/src antiblog/src antisync/src

@@ -6,13 +6,15 @@
 -}
 module Anticore.Config where
 
+import Control.Applicative
 import Control.Monad(liftM)
 import Data.Aeson
 import qualified Data.ByteString.Lazy as L
 import System.Directory(getHomeDirectory)
 import System.FilePath.Posix(combine)
 
-import Anticore.Utils
+import Anticore.Data.Outcome
+import Anticore.Data.Tagged
 
 -- | Typesafe wrapper around system's base URL.
 newtype BaseURL = BaseURL String
@@ -27,14 +29,14 @@ instance FromJSON BaseURL where
     parseJSON = liftM wrap . parseJSON
 
 -- | Loads settings from a file
-load :: (FromJSON a) => FilePath -> IOProc a
-load fname = L.readFile fname |>> eitherDecode |>> eitherToProc
+load :: (FromJSON a) => FilePath -> IO (Outcome a)
+load fname = eitherToProc <$> eitherDecode <$> L.readFile fname
     where eitherToProc (Left errmsg) = fail $
             "Error parsing '" ++ fname ++ "': " ++ errmsg
           eitherToProc (Right v) = return v
 
 -- | Loads settings from ~\/\</filename/\>
-loadHome :: (FromJSON a) => FilePath -> IOProc a
+loadHome :: (FromJSON a) => FilePath -> IO (Outcome a)
 loadHome suffix = do
     prefix <- getHomeDirectory
     load $ combine prefix suffix

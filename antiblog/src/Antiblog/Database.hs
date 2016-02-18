@@ -30,7 +30,7 @@ import System.Random(randomRIO)
 
 import Anticore.Api
 import Anticore.Model
-import Anticore.Utils
+import Anticore.Data.Tagged
 
 import Antihost.Database
 

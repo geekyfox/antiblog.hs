@@ -9,8 +9,8 @@ import Data.Aeson
 import Data.ByteString(ByteString)
 import Data.ByteString.Lazy(fromChunks)
 
+import Anticore.Data.Outcome
 import Anticore.Model
-import Anticore.Utils
 
 -- | Skeleton type for a single blog entry in different contexts.
 type EntryQuery a = Entry a (Maybe Summary) Title TransportExtra
@@ -61,7 +61,7 @@ instance (ToJSON x) => ToJSON (ApiMessage x) where
     toJSON (AM x) = object ["content" .= toJSON x]
 
 -- | Parses JSON document wrapping parse errors as `Fail`.
-decodeData :: (FromJSON a) => [ByteString] -> Processed a
+decodeData :: (FromJSON a) => [ByteString] -> Outcome a
 decodeData fragments =
     case eitherDecode $ fromChunks fragments of
          Left errmsg -> Fail $ show ("Invalid JSON: " ++ errmsg

@@ -37,7 +37,8 @@ import Data.String
 import qualified Data.Text as T
 
 import Anticore.Config
-import Anticore.Utils
+import Anticore.Data.Outcome
+import Anticore.Data.Tagged
 
 -- | Typesafe wrapper around the name of the system.
 newtype SystemName = SystemName String deriving Show
@@ -95,23 +96,23 @@ instance FromJSON Config where
     parseJSON _ = mzero        
 
 -- | Reads the configuration data from `~/.antisync/config.json`
-readConfig :: IOProc Config
+readConfig :: IO (Outcome Config)
 readConfig = loadHome ".antisync/config.json"
 
 -- | Loads the config and looks up the default endpoint.
-loadDefault :: IOProc Endpoint
+loadDefault :: IO (Outcome Endpoint)
 loadDefault = liftM (>>= seek) readConfig
     where
         seek (CFG n es) = select n es
 
 -- | Loads the config and looks up the endpoint by name.
-loadNamed :: SystemName -> IOProc Endpoint
+loadNamed :: SystemName -> IO (Outcome Endpoint)
 loadNamed n = liftM (>>= seek) readConfig
     where
         seek = select n . servers
 
 -- | Looks up endpoints by name.
-select :: SystemName -> [Endpoint] -> Processed Endpoint
+select :: SystemName -> [Endpoint] -> Outcome Endpoint
 select n = maybe (fail msg) return . find match
     where
         msg = "Endpoint not found in config.json: " ++ expose n

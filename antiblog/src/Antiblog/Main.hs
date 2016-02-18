@@ -4,6 +4,7 @@
 -- | Entrypoint module of `antiblog` executable.
 module Main(main) where
 
+import Control.Applicative
 import Control.Exception.Base(throw, PatternMatchFail(PatternMatchFail))
 import Control.Monad(liftM,liftM2,when)
 import Control.Monad.IO.Class(liftIO)
@@ -15,8 +16,9 @@ import System.IO
 import Web.Scotty hiding (body)
 
 import Anticore.Api
+import Anticore.Data.Outcome
 import Anticore.Model
-import Anticore.Utils
+import Anticore.Data.Tagged
 
 import Antihost.Database
 import Antihost.Model
@@ -26,7 +28,7 @@ import Antiblog.Database
 import Antiblog.Layout hiding (baseUrl,tags,title,summary)
 
 getNotFound :: PoolT -> ConfigSRV -> IO T.Text
-getNotFound db cfg = augm |>> renderNotFound
+getNotFound db cfg = renderNotFound <$> augm
     where
         tags = fetchTagCloud db
         augm = liftM (\ts -> comprise cfg ts ()) tags
@@ -38,13 +40,11 @@ getEntry db cfg uid pk = entry >>= maybe notFound render
         entry    = fetchEntry db uid pk
         tags     = fetchTagCloud db
         notFound = getNotFound db cfg
-        render e = tags |>> combine |>> renderEntry
-            where
-                combine ts = comprise cfg ts e
+        render e = renderEntry <$> (\ts -> comprise cfg ts e) <$> tags
 
 -- | Provides a list page at given URL.
 getPage :: PoolT -> ConfigSRV -> Index -> Maybe String -> IO T.Text
-getPage db cfg ix mtag = augm |>> renderPage
+getPage db cfg ix mtag = renderPage <$> augm
     where
         page = fetchPage db ix mtag
         tags = fetchTagCloud db
@@ -52,13 +52,13 @@ getPage db cfg ix mtag = augm |>> renderPage
         
 -- | Provides an RSS feed.
 getFeed :: PoolT -> ConfigSRV -> IO String
-getFeed db cfg = liftM render $ fetchFeed db
+getFeed db cfg = render <$> fetchFeed db
     where
         render = renderFeed cfg
 
 -- | Provides a random link.
 getRandom :: PoolT -> ConfigSRV -> IO T.Text
-getRandom db cfg = fetchRandom db |>> urlConcat (baseUrl cfg) |>> T.pack
+getRandom db cfg = T.pack <$> urlConcat (baseUrl cfg) <$> fetchRandom db
 
 mparam :: (Parsable a) => T.Text -> ActionM (Maybe a)
 mparam key = fmap Just (param key) `rescue` (\_ -> return Nothing)
@@ -147,10 +147,10 @@ webloop db sys =
             ref <- param "id"
             renderEntry ref Normal
         get "/page/:id" $ do
-            (ix, mtag) <- (param "id") |>> parseRef
+            (ix, mtag) <- parseRef <$> param "id"
             renderPage ix mtag
         get "/page/:tag/:id" $ do
-            mix <- param "id" |>> parseIndex
+            mix <- parseIndex <$> param "id"
             tag <- param "tag"
             case mix of
                  Just ix -> renderPage ix (Just tag)
@@ -164,7 +164,7 @@ webloop db sys =
                  Nothing -> renderEntry ref Meta
         get "/rss.xml" $ do
             setHeader "Content-Type" "text/xml"            
-            invoke_ getFeed |>> C.pack >>= raw
+            (C.pack <$> invoke_ getFeed) >>= raw
         get "/api/index" $ secure sys $ do
             index <- liftIO (fetchEntryIndex db)
             json index

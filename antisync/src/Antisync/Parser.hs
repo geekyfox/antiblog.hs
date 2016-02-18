@@ -103,8 +103,9 @@ import Control.Monad(foldM)
 import Data.List(intercalate)
 import Data.String.Utils(strip)
 
+import Anticore.Data.Outcome
 import qualified Anticore.Model as M
-import Anticore.Utils
+import Anticore.Data.Tagged
 
 import Antisync.Config(SystemName)
 
@@ -208,7 +209,7 @@ signature e = md5s $ Str $ concatMap (\f -> f e)
         ]
 
 -- | Final stage of parsing, convert parser state into an `EntryFS`.
-buildFS :: Parser -> Processed M.EntryFS
+buildFS :: Parser -> Outcome M.EntryFS
 buildFS p
     | not $ publish p       = Skip "Not for publishing"
     | null $ expose content = Fail "Body is missing"
@@ -255,7 +256,7 @@ append p s =
 
 
 -- | Inserts `summary` into `body`.
-insertSummary :: Parser -> Processed Parser
+insertSummary :: Parser -> Outcome Parser
 insertSummary p | state p /= Body = Fail
     "insert-summary is allowed inside content block"
 insertSummary p =
@@ -264,7 +265,7 @@ insertSummary p =
          Just s  -> OK $ append p $ expose s
 
 -- | Starts accumulating new footnote.
-startFootnote :: Parser -> Processed Parser
+startFootnote :: Parser -> Outcome Parser
 startFootnote p | state p /= Body = Fail
     "footnotes is only allowed inside content block"
 startFootnote p = OK p
@@ -297,20 +298,20 @@ startBody p =
          _ -> p { state = Body }
 
 -- | Switches parser into `Code` state.
-startCode :: Parser -> Processed Parser
+startCode :: Parser -> Outcome Parser
 startCode p | state p /= Body = Fail
     "code is only allowed inside content block"
 startCode p = OK p  { body  = Newline:Raw "<pre>":body p
                     , state = Code
                     }
 
-addSeries :: Parser -> String -> Int -> Processed Parser
+addSeries :: Parser -> String -> Int -> Outcome Parser
 addSeries p s ix = OK $ p {
         series = M.SeriesRef s ix : series p
     }
 
 -- | Parses a single line of the text.
-parseLine :: Parser -> String -> Processed Parser
+parseLine :: Parser -> String -> Outcome Parser
 parseLine p line =
     let
         impl ["draft"] =
@@ -353,5 +354,5 @@ parseLine p line =
          _ -> OK $ append p line
 
 -- | Parses the whole text.
-parseText :: SystemName -> [String] -> Processed M.EntryFS
+parseText :: SystemName -> [String] -> Outcome M.EntryFS
 parseText sys txt = foldM parseLine (mk sys) txt >>= buildFS

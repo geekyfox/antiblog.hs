@@ -23,7 +23,8 @@ import Data.Aeson
 import qualified Data.Text as T
 
 import Anticore.Config
-import Anticore.Utils(exposeOrDie,(|>>),TaggedString(expose,wrap))
+import Anticore.Data.Outcome(exposeOrDie)
+import Anticore.Data.Tagged(TaggedString(expose,wrap))
 
 newtype SiteTitle = SiteTitle String
 
@@ -65,4 +66,4 @@ instance FromJSON ConfigSRV where
 
 -- | Loads server settings from `~/<filename>`.
 serverConfig :: FilePath -> IO ConfigSRV
-serverConfig fp = loadHome fp |>> exposeOrDie
+serverConfig fp = exposeOrDie <$> loadHome fp

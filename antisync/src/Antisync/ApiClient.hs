@@ -6,6 +6,7 @@
 
 module Antisync.ApiClient where
 
+import Control.Applicative
 import Control.Arrow((***))
 import Control.Exception(catch)
 import Control.Monad(liftM)
@@ -21,9 +22,9 @@ import Network.HTTP.Types.Header
 import Network.HTTP.Types.Status
 
 import Anticore.Api
+import Anticore.Data.Outcome
+import Anticore.Data.Tagged
 import Anticore.Model
-import Anticore.Utils hiding (encode)
-import qualified Anticore.Utils as U
 
 import Antisync.Config
 
@@ -42,8 +43,8 @@ fmtHttpError ex = show ex
 
 -- | Main wrapper for API calls. Makes a request, then parses response
 --   using `decodeData`.
-query :: (FromJSON a) => Request -> IOProc a
-query req = withManager defaultManagerSettings protect |>> decode
+query :: (FromJSON a) => Request -> IO (Outcome a)
+query req = decode <$> withManager defaultManagerSettings protect
     where
         protect mgr  = work mgr `catch` handleError
         work mgr     = withResponse req mgr handleResult
@@ -53,40 +54,40 @@ query req = withManager defaultManagerSettings protect |>> decode
 
 -- | Prepares a request for querying specific API method.
 mkRequest :: String -> Endpoint -> IO Request
-mkRequest method sys = parseUrl url |>> setQueryString qs
+mkRequest method sys = setQueryString qs <$> parseUrl url
     where
         url = apiUrl sys ++ method
         qs  = [("api_key", Just $ encodeUtf8 $ remoteApiKey sys)]
 
 -- | Prepares a request for POSTing to specific API method.
 mkPostRequest :: String -> Endpoint -> [(String, String)] -> IO Request
-mkPostRequest method sys args = baseRequest |>> attachArgs
+mkPostRequest method sys args = attachArgs <$> baseRequest
     where
         baseRequest = mkRequest method sys
         encodedArgs = map (pack *** pack) args
         attachArgs  = urlEncodedBody encodedArgs
 
 -- | Retrieves the list of entries on the server.
-retrieveIndex :: Endpoint -> IOProc [EntryHash]
+retrieveIndex :: Endpoint -> IO (Outcome [EntryHash])
 retrieveIndex sys = mkRequest "index" sys >>= query
 
 -- | Shorthand type.
 type EntryIndex = Map Int String
 
 -- | Retrieves the list of entries on server as `Map Int String`.
-queryIndexAsMap :: Endpoint -> IOProc EntryIndex
-queryIndexAsMap sys = retrieveIndex sys |>> fmap toMap
+queryIndexAsMap :: Endpoint -> IO (Outcome EntryIndex)
+queryIndexAsMap sys = fmap toMap <$> retrieveIndex sys
     where
         toMap es = fromList [ (huid e, hash e) | e <- es ]
 
 -- | Gathers arguments for create/update POST request.
-encode :: EntryFS -> [(String, String)]
-encode e = mapMaybe wrap optionals ++ mandatories
+encodeEntry :: EntryFS -> [(String, String)]
+encodeEntry e = mapMaybe wrap optionals ++ mandatories
     where
-        get fun      = fun e |>> expose
+        get fun      = expose <$> fun e
         wrap (k, mv) = maybe Nothing (\v -> Just (k, v)) mv
         optionals =
-            [ ("id",        uid e |>> show)
+            [ ("id", show <$> uid e)
             , ("title",     get title)
             , ("summary",   get summary)
             , ("symlink",   get symlink)
@@ -96,18 +97,18 @@ encode e = mapMaybe wrap optionals ++ mandatories
             [ ("signature", md5sig e)
             , ("body",      expose $ body e)
             , ("tags",      expose $ tags e)
-            , ("series",    U.encode $ seriesRef e)
+            , ("series",    encode $ seriesRef e)
             ]
 
 -- | Updates an entry.
-updateEntry :: Endpoint -> EntryFS -> IOProc ReplyUP
-updateEntry sys e = mkPostRequest "update" sys (encode e) >>= query
+updateEntry :: Endpoint -> EntryFS -> IO (Outcome ReplyUP)
+updateEntry sys e = mkPostRequest "update" sys (encodeEntry e) >>= query
 
 -- | Creates an entry, returning new entry's ID on success.
-createEntry :: Endpoint -> EntryFS -> IOProc ReplyCR
-createEntry sys e = mkPostRequest "create" sys (encode e) >>= query
+createEntry :: Endpoint -> EntryFS -> IO (Outcome ReplyCR)
+createEntry sys e = mkPostRequest "create" sys (encodeEntry e) >>= query
 
-promoteEntry :: Endpoint -> Int -> IOProc ReplyPR
+promoteEntry :: Endpoint -> Int -> IO (Outcome ReplyPR)
 promoteEntry sys uid = mkPostRequest "promote" sys params >>= query
     where
         params = [("id", show uid)]
