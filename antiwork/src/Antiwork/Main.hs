@@ -12,5 +12,5 @@ main = do
     args <- getArgs
     when (length args /= 1) (error "Config file location is missing")
     sys <- serverConfig (head args)
-    db <- mkPool (dbConnString sys)
+    db <- connect (dbConnString sys)
     rotateEntries db >>= mapM_ putStrLn

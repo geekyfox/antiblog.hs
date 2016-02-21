@@ -34,7 +34,6 @@ import qualified Anticore.Model as M
 import Anticore.Data.Tagged
 
 import qualified Antihost.Config as C
-import Antiblog.Model
 
 data Augmented a = AUG {
      value :: a
@@ -83,19 +82,19 @@ comprise cfg tags x = AUG
             | otherwise = wrap generalTitle
         suffix = maybe "" (\x -> ": " ++ x) . fmap expose
 
-instance Entity Page where
+instance Entity M.Page where
     entityHasRss _ = True
     entityTitle _   = Nothing
-    entityUrl b = fromString . urlConcat b . own
+    entityUrl b = fromString . urlConcat b . M.own
     entitySummary _ = Nothing
         
         -- wrap "The Antiblog by Ivan Appel"
 
-instance Entity SingleEntry where
+instance Entity M.SingleEntry where
     entityHasRss _ = False
-    entityTitle = Just . wrap . displayTitle . unbox
-    entityUrl b = permalink b . unbox
-    entitySummary = Just . M.summary . unbox
+    entityTitle = Just . wrap . displayTitle . M.unbox
+    entityUrl b = permalink b . M.unbox
+    entitySummary = Just . M.summary . M.unbox
 
 instance Entity () where
     entityHasRss _ = False
@@ -130,21 +129,21 @@ opengraph w =
         property = customAttribute "property"
 
 -- | Display title of the entry (either title or #\$id)
-displayTitle :: (IsString b) => EntryData -> b
+displayTitle :: (IsString b) => M.EntryData -> b
 displayTitle e = fromString $ fmt $ expose $ M.title e
     where fmt "" = '#' : show (M.uid e)
           fmt st = st
 
 -- | Permanent link of the entry.
-permalink :: (IsString b) => BaseURL -> EntryData -> b
+permalink :: (IsString b) => BaseURL -> M.EntryData -> b
 permalink base entry = fromString $ urlConcat base preferred
     where
         preferred = fromMaybe standard optional
         standard  = "entry/" ++ show (M.uid entry)
         optional  = listToMaybe $ catMaybes priority
-        priority  = case pageKind entry of
-                         Normal -> [symlink, metalink]
-                         Meta   -> [metalink, symlink]
+        priority  = case M.pageKind entry of
+                         M.Normal -> [symlink, metalink]
+                         M.Meta   -> [metalink, symlink]
         symlink   = expose <$> M.symlink entry
         metalink  = expose <$> M.metalink entry
 
@@ -229,7 +228,7 @@ layoutCommon w content =
                 content
 
 -- | Produces a barebone block of HTML with an entry.
-layoutEntryBarebone :: (RenderEntry b) => Augmented a -> b -> Html
+layoutEntryBarebone :: (M.RenderEntry b) => Augmented a -> b -> Html
 layoutEntryBarebone w@AUG{baseUrl = base} ec =
     H.div ! class_ entryClass $ do
         H.div ! class_ "header colored" $ self (displayTitle e)
@@ -237,13 +236,12 @@ layoutEntryBarebone w@AUG{baseUrl = base} ec =
             H.div ! class_ "stuff" $ do
                 seriesLinksBlock
                 preEscapedText (shapeshift $ M.body e)
-                when (readMore ec) readMoreBlock    
+                when (M.readMore ec) readMoreBlock    
         unless tagless $
             H.div ! class_ "footer" $
                 mapM_ taglink ts'
-    
     where
-        e           = unbox ec
+        e = M.unbox ec
         (M.Tags ts)   = M.tags e
         ts'         = patchTags w Prelude.id ts
         tagless     = null ts'
@@ -260,28 +258,28 @@ layoutEntryBarebone w@AUG{baseUrl = base} ec =
                           ! class_ "colored"
                           $ fromString $ prettifyTag t
         seriesLinksBlock =
-            case seriesLinks ec of
+            case M.seriesLinks ec of
                  Nothing -> return ()
-                 Just sl -> H.div ! class_ "series-links" $ do
-                     a ! mkref w (linkFirst sl) $ "First in series"
+                 Just (M.SL first prev next last) -> H.div ! class_ "series-links" $ do
+                     a ! mkref w first $ "First in series"
                      " | "
-                     sLink "Previous" $ linkPrev sl
+                     sLink "Previous" prev
                      " | "
-                     sLink "Next" $ linkNext sl
+                     sLink "Next" next
                      " | "
-                     a ! mkref w (linkLast sl) $ "Last in series"
+                     a ! mkref w last $ "Last in series"
         sLink :: Html -> Maybe String -> Html
         sLink txt Nothing = txt
         sLink txt (Just v) = a ! mkref w v $ txt
 
 -- | Produces a complete page with single entry.
-layoutEntry :: Augmented SingleEntry -> Html
+layoutEntry :: Augmented M.SingleEntry -> Html
 layoutEntry w@AUG{value = paged} = layoutCommon w inner
     where
         inner = layoutEntryBarebone w paged
 
 -- | Produces a complete page with multiple entries
-layoutPage :: Augmented Page -> Html
+layoutPage :: Augmented M.Page -> Html
 layoutPage w@AUG{value = page} = layoutCommon w inner
     where
         navi f css txt =
@@ -290,10 +288,10 @@ layoutPage w@AUG{value = page} = layoutCommon w inner
                  Just h  -> H.div ! class_ css $ a ! mkref w h $ txt
         snippet = layoutEntryBarebone w
         inner = do
-            mapM_ snippet $ entries page
+            mapM_ snippet $ M.entries page
             H.div ! class_ "navi-container" $ do
-                navi previous "navi previous" "Previous page"
-                navi next     "navi next"     "Next page"  
+                navi M.previous "navi previous" "Previous page"
+                navi M.next "navi next" "Next page"  
 
 layoutNotFound :: Augmented () -> Html
 layoutNotFound w = layoutCommon w inner
@@ -329,10 +327,10 @@ renderFeed w items = showXML $ rssToXML feed
         convertTitle ti = [Title ti]
 
 
-renderEntry :: Augmented SingleEntry -> Text
+renderEntry :: Augmented M.SingleEntry -> Text
 renderEntry = renderHtml . layoutEntry
 
-renderPage :: Augmented Page -> Text
+renderPage :: Augmented M.Page -> Text
 renderPage = renderHtml . layoutPage
 
 renderNotFound :: Augmented () -> Text

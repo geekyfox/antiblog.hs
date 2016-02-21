@@ -77,3 +77,5 @@ readInt s = case reads s of
 class Encodable a where
     encode :: a -> String
     decode :: String -> Outcome a
+    decodeSafe :: String -> a
+    decodeSafe = exposeOrDie . decode

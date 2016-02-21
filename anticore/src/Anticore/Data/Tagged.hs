@@ -13,3 +13,6 @@ class TaggedString w where
     -- | Adapter between custom `TaggedString` and common `IsString`.
     shapeshift :: (IsString a) => w -> a
     shapeshift = fromString . expose
+
+    liftT :: (String -> String) -> w -> w
+    liftT f = wrap . f . expose

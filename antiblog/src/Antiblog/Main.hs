@@ -21,10 +21,8 @@ import Anticore.Model
 import Anticore.Data.Tagged
 
 import Antihost.Database
-import Antihost.Model
 
 import Antihost.Config
-import Antiblog.Database
 import Antiblog.Layout hiding (baseUrl,tags,title,summary)
 
 getNotFound :: PoolT -> ConfigSRV -> IO T.Text
@@ -37,8 +35,8 @@ getNotFound db cfg = renderNotFound <$> augm
 getEntry :: PoolT -> ConfigSRV -> String -> PageKind -> IO T.Text
 getEntry db cfg uid pk = entry >>= maybe notFound render
     where
-        entry    = fetchEntry db uid pk
-        tags     = fetchTagCloud db
+        entry = fetchEntry db pk uid
+        tags = fetchTagCloud db
         notFound = getNotFound db cfg
         render e = renderEntry <$> (\ts -> comprise cfg ts e) <$> tags
 
@@ -52,13 +50,11 @@ getPage db cfg ix mtag = renderPage <$> augm
         
 -- | Provides an RSS feed.
 getFeed :: PoolT -> ConfigSRV -> IO String
-getFeed db cfg = render <$> fetchFeed db
-    where
-        render = renderFeed cfg
+getFeed db cfg = renderFeed cfg <$> fetchRssFeed db
 
 -- | Provides a random link.
 getRandom :: PoolT -> ConfigSRV -> IO T.Text
-getRandom db cfg = T.pack <$> urlConcat (baseUrl cfg) <$> fetchRandom db
+getRandom db cfg = T.pack <$> urlConcat (baseUrl cfg) <$> fetchRandomEntry db
 
 mparam :: (Parsable a) => T.Text -> ActionM (Maybe a)
 mparam key = fmap Just (param key) `rescue` (\_ -> return Nothing)
@@ -107,24 +103,24 @@ instance Parsable SeriesRef where
 -- | Decodes params for entry create/update.
 decodeEntry :: ActionM a -> ActionM (EntryQuery a)
 decodeEntry muid = do
-    uid      <- muid    
-    body     <- param "body"
-    md5sig   <- param "signature"
-    title    <- defparam "" "title"
-    symlink  <- mparam "symlink"
+    uid <- muid
+    body <- param "body"
+    md5sig <- param "signature"
+    title <- defparam "" "title"
+    symlink <- mparam "symlink"
     metalink <- mparam "metalink"
-    summary  <- mparam "summary"
-    tags     <- defparam "" "tags"
-    series   <- encparam (Series []) "series"
+    summary <- mparam "summary"
+    tags <- defparam "" "tags"
+    series <- encparam (Series []) "series"
     return Entry
-        {title    = wrap title
-        ,body     = wrap body
-        ,symlink  = fmap wrap symlink
-        ,metalink = fmap wrap metalink
-        ,uid      = uid
-        ,summary  = fmap wrap summary
-        ,tags     = wrap tags
-        ,extra    = TREX md5sig series
+        {title = wrap title
+        ,body = wrap body
+        ,symlink = wrap <$> symlink
+        ,metalink = wrap <$> metalink
+        ,uid = uid
+        ,summary = wrap <$> summary
+        ,tags = decodeSafe tags
+        ,extra = TREX md5sig series
         }
 
 decodeEntryPromote :: ActionM Int
@@ -136,10 +132,7 @@ webloop db sys =
     let
         renderPage ix mtag = liftIO (getPage db sys ix mtag) >>= html
         renderEntry ref pk = liftIO (getEntry db sys ref pk) >>= html
-        invoke_ f        = liftIO (f db sys)
-        invoke f arg     = liftIO (f db sys arg)
-        htmlIO' f url    = invoke f url >>= html
-        htmlIO f suf sub = htmlIO' f $ suf ++ sub
+        invoke_ f  = liftIO (f db sys)
     in scotty (httpPort sys) $ do
         get "/entry/random" $
             invoke_ getRandom >>= redirect
@@ -191,5 +184,5 @@ main = do
     args <- getArgs
     when (length args /= 1) (error "Config file location is missing")
     sys <- serverConfig (head args)    
-    db <- mkPool (dbConnString sys)
+    db <- connect (dbConnString sys)
     webloop db sys

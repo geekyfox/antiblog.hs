@@ -1,5 +1,10 @@
 
+.PHONY: build
 build: antiwork/stamp antiblog/stamp antisync/stamp
+
+.PHONY: anticore antihost
+anticore: anticore/stamp
+antihost: antihost/stamp
 
 anticore/stamp: anticore/src/Anticore/**/*hs
 	cd anticore && cabal install

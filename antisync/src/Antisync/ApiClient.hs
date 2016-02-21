@@ -84,20 +84,20 @@ queryIndexAsMap sys = fmap toMap <$> retrieveIndex sys
 encodeEntry :: EntryFS -> [(String, String)]
 encodeEntry e = mapMaybe wrap optionals ++ mandatories
     where
-        get fun      = expose <$> fun e
+        get fun = expose <$> fun e
         wrap (k, mv) = maybe Nothing (\v -> Just (k, v)) mv
         optionals =
-            [ ("id", show <$> uid e)
-            , ("title",     get title)
-            , ("summary",   get summary)
-            , ("symlink",   get symlink)
-            , ("metalink",  get metalink)
+            [("id", show <$> uid e)
+            ,("title", get title)
+            ,("summary", get summary)
+            ,("symlink", get symlink)
+            ,("metalink", get metalink)
             ]
         mandatories =
-            [ ("signature", md5sig e)
-            , ("body",      expose $ body e)
-            , ("tags",      expose $ tags e)
-            , ("series",    encode $ seriesRef e)
+            [("signature", md5sig e)
+            ,("body", expose $ body e)
+            ,("tags", encode $ tags e)
+            ,("series", encode $ seriesRef e)
             ]
 
 -- | Updates an entry.

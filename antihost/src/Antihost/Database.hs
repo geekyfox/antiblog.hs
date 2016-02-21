@@ -1,133 +1,164 @@
 
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
-module Antihost.Database where
+module Antihost.Database (
+    PoolT
+    ,connect
+    ,createEntry
+    ,fetchEntry
+    ,fetchEntryIndex
+    ,fetchPage
+    ,fetchRandomEntry
+    ,fetchRssFeed
+    ,fetchTagCloud
+    ,promoteEntry
+    ,rotateEntries
+    ,updateEntry
+) where
 
 import Control.Applicative
-import Control.Monad(
-        join
-       )
-import Data.ByteString.Char8(
-        pack
-       )
+import Data.ByteString.Char8(pack)
 import Data.Char(isNumber)
 import Data.List(sortBy)
-import Data.List.Split(splitOn)       
 import Data.Maybe
 import Data.Ord(comparing)
-import Data.Pool(
-        Pool
-       ,withResource
-       ,createPool
-       )
-import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.FromField(
-        FromField
-       )
+import Data.Pool(Pool, withResource, createPool)
+import Database.PostgreSQL.Simple hiding (connect)
+import Database.PostgreSQL.Simple.FromField
+import Database.PostgreSQL.Simple.ToField
        
 import GHC.Int
+import System.Random(randomRIO)
 
+import Anticore.Api
+import Anticore.Control.Flip((<$$>),(<!!>))
+import Anticore.Data.Tagged
 import Anticore.Model
-import Antihost.Model
 
 -- | Shorthand type name for a pool of PostgreSQL connections.
 type PoolT = Pool Connection
 
--- | Shorthand type name for resultsets of void-typed stored
---   procedures.
-type DBVoid = [Only ()]
-
-type DBIO a = Connection -> IO a
-
-mutate_ :: Connection -> Query -> IO ()
-mutate_ c q = do
-    query_ c q :: IO DBVoid
-    return ()
-
-mutate :: (ToRow a) => Connection -> Query -> a -> IO ()
-mutate c q r = do
-    query c q r :: IO DBVoid
-    return ()
-
-oneRow_ :: (FromRow a) => Connection -> Query -> IO (Maybe a)
-oneRow_ c q = listToMaybe <$> query_ c q
-
-oneField_ :: (FromField a) => Connection -> Query -> IO (Maybe a)
-oneField_ c q = join <$> fmap fromOnly <$> oneRow_ c q
-
 -- | Creates a connection pool with a given connstring.
-mkPool :: String -> IO PoolT
-mkPool cs = createPool (connectPostgreSQL $ pack cs) close 1 30 10
+connect :: String -> IO PoolT
+connect cs = createPool (connectPostgreSQL $ pack cs) close 1 30 10
 
--- | Utility function for queries without arguments.
-fetchSimple :: (FromRow a) => PoolT -> Query -> IO [a]
-fetchSimple pool sql = withResource pool retrieve
-    where retrieve conn = query_ conn sql
+createEntry :: PoolT -> QueryCR -> IO ReplyCR
+createEntry p q = AM <$> withResource p (`createEntryImpl` q)
 
--- | Utility function for queries with arguments.
-fetch :: (ToRow a, FromRow b) => PoolT -> a -> Query -> IO [b]
-fetch pool args sql = withResource pool retrieve
-    where retrieve conn = query conn sql args
+-- | Updates an entry.
+updateEntry :: PoolT -> QueryUP -> IO ReplyUP
+updateEntry p e = AM <$> withResource p (\c -> updateEntryImpl c (uid e) e)
+
+-- | Retrieves a single entry at particular URL or 'Nothing' if
+--   no matching entry found.
+fetchEntry :: PoolT -> PageKind -> String -> IO (Maybe SingleEntry)
+fetchEntry p pk ref = withResource p (\c -> fetchEntryImpl c pk ref)
+
+-- | Retrieves a page to show at particular URL.
+fetchPage :: PoolT -> Index -> Maybe String -> IO Page
+fetchPage p ix mtag = withResource p (\c -> fetchPageImpl c ix mtag)
+
+-- | Retrieves the list of entries in RSS feed.
+fetchRssFeed :: PoolT -> IO [RssEntry]
+fetchRssFeed p = withResource p fetchRssFeedImpl
+
+-- | Retrieves the list of database entries.
+fetchEntryIndex :: PoolT -> IO [EntryHash]
+fetchEntryIndex p = withResource p fetchEntryIndexImpl
 
 promoteEntry :: PoolT -> Int -> IO Int64
-promoteEntry p uid = withResource p go
-    where
-        go c = get c >>= maybe (return 0) (set c)
-        get :: DBIO (Maybe Int)
-        get c = oneField_ c "SELECT MAX(rank) FROM entry"
-        set c v = do
-            execute c "UPDATE entry SET rank=? WHERE id=?" (v+1, uid)
+promoteEntry p uid = withResource p (`maximizeRank` uid)
 
-slideEntryRanks :: Connection -> Int -> IO ()
-slideEntryRanks c bottomRank = get >>= mapM_ set
-    where
-        get :: IO [Only Int]
-        get = query c "SELECT id FROM entry WHERE rank >= ? ORDER BY rank DESC" (Only bottomRank)
-        set (Only uid) = execute c "UPDATE entry SET rank = rank + 1 WHERE id = ?" (Only uid)
+-- | Retrieves the count of entries with given tag
+fetchTagCloud :: PoolT -> IO [TagUsage]
+fetchTagCloud p = withResource p fetchTagCloudImpl
 
-slideFeedPosition :: Connection -> IO ()
-slideFeedPosition c = get >>= mapM_ set
-    where
-        get :: IO [Only Int]
-        get = query_ c "SELECT entry_id FROM rss_entry ORDER BY feed_position DESC"
-        set (Only uid) = execute c "UPDATE rss_entry SET feed_position = feed_position + 1 WHERE entry_id = ?" (Only uid)
-
-formatEntryLink :: Connection -> Int -> IO String
-formatEntryLink c uid = decide <$> get
-    where
-        get = query c "SELECT link, kind FROM symlink WHERE entry_id = ?" (Only uid)
-        decide :: [(String, String)] -> String
-        decide xs = head $ [ "/entry/" ++ a | (a,b) <- xs, b == "normal" ] ++
-                           [ "/meta/" ++ a | (a,b) <- xs, b == "meta" ]   ++
-                           [ "/entry/" ++ show uid ]    
+-- | Retrieves an URL to a random entry.
+fetchRandomEntry :: PoolT -> IO String
+fetchRandomEntry p = withResource p fetchRandomEntryImpl
 
 rotateEntries :: PoolT -> IO [String]
-rotateEntries p = withResource p go
+rotateEntries p = withResource p rotateEntriesImpl
+
+--
+-- Public API ends here.
+--
+
+deriving instance FromField Body
+deriving instance ToField Body
+deriving instance FromField Metalink
+deriving instance ToField Metalink
+deriving instance FromField Summary
+deriving instance ToField Summary
+deriving instance FromField Title
+deriving instance ToField Title
+deriving instance FromField Symlink
+deriving instance ToField Symlink
+
+queryInt_ :: Connection -> Query -> IO [Int]
+queryInt_ c q = fromOnly <$$> query_ c q
+
+queryInt :: (ToRow a) => Connection -> a -> Query -> IO [Int]
+queryInt c a q = fromOnly <$$> query c q a
+
+maximizeRank :: Connection -> Int -> IO Int64
+maximizeRank conn uid = get >>= set
     where
-        go c = do
-            [(mmx,ct)] <- stats c
-            case mmx of
-                 Nothing ->
-                     return ["Database is empty, nothing to rotate."]
-                 Just mx | mx == ct -> do
-                     uid <- lookup c mx
-                     shift c uid
-                     lnk <- formatEntryLink c uid
-                     shuffle c
-                     return ["Promoted entry " ++ lnk, "Performed reshuffling"]
-                 Just mx -> do
-                     uid <- lookup c mx
-                     shift c uid
-                     lnk <- formatEntryLink c uid
-                     return ["Promoted entry " ++ lnk]
+        get = queryInt_ conn "SELECT MAX(rank) FROM entry"
+        set [] = return 0
+        set (v:_) = execute conn "UPDATE entry SET rank=? WHERE id=?" (v+1, uid)
+
+slideEntryRanks :: Connection -> Int -> IO ()
+slideEntryRanks conn threshold = get >>= mapM_ set
+    where
+        get = queryInt conn (Only threshold)
+            "SELECT id FROM entry WHERE rank >= ? ORDER BY rank DESC"
+        set uid = execute conn "UPDATE entry SET rank = rank + 1 WHERE id = ?" (Only uid)
+
+slideFeedPosition :: Connection -> IO ()
+slideFeedPosition conn = get >>= mapM_ set
+    where
+        get = queryInt_ conn "SELECT entry_id FROM rss_entry ORDER BY feed_position DESC"
+        set uid = execute conn
+            "UPDATE rss_entry SET feed_position = feed_position + 1 WHERE entry_id = ?" (Only uid)
+
+formatEntryLinkInContext :: Connection -> PageKind -> Int -> IO String
+formatEntryLinkInContext c pk uid = decide <$> get
+    where
+        get = query c "SELECT link, kind FROM symlink WHERE entry_id = ?" (Only uid)
+        pick :: (Eq a) => a -> [(b,a)] -> Maybe b
+        pick x xs = listToMaybe [ b | (b,a) <- xs, a == x ]
+        decide :: [(String, String)] -> String
+        decide xs = case (pk, pick "normal" xs, pick "meta" xs) of
+            (Normal, Just n, _) -> "/entry/" ++ n
+            (Meta, _, Just m) -> "/meta/" ++ m
+            (_, Just n, _) -> "/entry/" ++ n
+            (_, _, Just m) -> "/meta/" ++ m
+            _ -> "/entry/" ++ show uid
+
+formatEntryLink :: Connection -> Int -> IO String
+formatEntryLink c = formatEntryLinkInContext c Normal
+
+rotateEntriesImpl :: Connection -> IO [String]
+rotateEntriesImpl c = do
+        [(mmx,ct)] <- stats c
+        case mmx of
+            Nothing ->
+                return ["Database is empty, nothing to rotate."]
+            Just mx -> do
+                [Only uid] <- query c "SELECT id FROM entry WHERE rank = ?" (Only mx)
+                shift c uid
+                lnk <- formatEntryLink c uid
+                let msg = "Promoted entry" ++ lnk
+                if mx /= ct then return [msg] else do
+                    shuffle c
+                    return [msg, "Performed reshuffling"]
         --
+    where
         stats :: Connection -> IO [(Maybe Int, Int)]
         stats c = query_ c "SELECT MAX(rank), COUNT(1)::integer entry_count FROM entry"
-        --
-        lookup :: Connection -> Int -> IO Int
-        lookup c mx = do
-            [Only uid] <- query c "SELECT id FROM entry WHERE rank = ?" (Only mx)
-            return uid
         --
         shift c uid = do
             slideEntryRanks c 1
@@ -144,7 +175,6 @@ rotateEntries p = withResource p go
                        \(SELECT 1 FROM rss_entry re WHERE e.id = re.entry_id) \
                        \AND NOT EXISTS \
                        \(SELECT 1 FROM entry ee WHERE ee.rank = e.rank * 2)"
-
 
 fetchSeries :: Connection -> Int -> IO [SeriesLinks]
 fetchSeries c uid = go c
@@ -169,22 +199,13 @@ fetchSeries c uid = go c
         fetch _ [] = return Nothing
         fetch c (i:_) = Just <$> formatEntryLink c i
 
-decodePageHref :: String -> (Index, Maybe String)
-decodePageHref href = go $ splitOn "/" href
-    where
-        go ["", ""] = (Number 1, Nothing)
-        go ["", "page", cs] | all isNumber cs = (Number $ read cs, Nothing)
-        go ["", "page", "last"] = (Last, Nothing)
-        go ["", "page", cs] = (Number 1, Just cs)
-        go ["", "page", cs, ds] | all isNumber ds = (Number $ read ds, Just cs)
-        go ["", "page", cs, "last"] = (Last, Just cs)
-        go tokens = error ("decodePageHref" ++ show tokens)
-
-encodePageHref :: Maybe String -> Int -> String
-encodePageHref Nothing 1 = "/"
-encodePageHref Nothing n = "/page/" ++ show n
-encodePageHref (Just v) 1 = "/page/" ++ v
-encodePageHref (Just v) n = "/page/" ++ v ++ "/" ++ show n
+encodePageHref :: Maybe String -> Index -> String
+encodePageHref Nothing (Number 1) = "/"
+encodePageHref Nothing (Number n) = "/page/" ++ show n
+encodePageHref Nothing Last = "/page/last"
+encodePageHref (Just v) (Number 1) = "/page/" ++ v
+encodePageHref (Just v) (Number n) = "/page/" ++ v ++ "/" ++ show n
+encodePageHref (Just v) Last = "/page/" ++ v ++ "/last"
 
 fetchEntriesCount :: Connection -> Maybe String -> IO Int
 fetchEntriesCount c (Just "micro") = fetchMicroCount c
@@ -202,28 +223,19 @@ fetchPreviousNext c ix mtag = do
     let pageCount = (entryCount + 4) `div` 5
     let absIx = case ix of { Last -> pageCount ; Number n -> n }
     let prev = if (absIx <= 1) || (absIx > pageCount) then Nothing
-               else Just (encodePageHref mtag (absIx - 1))
+               else Just (encodePageHref mtag (Number $ absIx - 1))
     let next = if (absIx <= 0) || (absIx >= pageCount) then Nothing
-               else Just (encodePageHref mtag (absIx + 1))
+               else Just (encodePageHref mtag (Number $ absIx + 1))
     return (prev, next)
     
--- | Retrieves the count of entries with given tag
-fetchTagCloud :: PoolT -> IO [TagUsage]
-fetchTagCloud p = withResource p go
-    where
-        wrap = map (uncurry TagUsage) . sortBy (flip (comparing snd))
-        go c = do
-            xs <- query_ c "SELECT tag, COUNT(1)::integer \
-                          \FROM entry_tag GROUP BY tag"
-            mc <- fetchMicroCount c
-            mt <- fetchMetaCount c
-            return $ wrap $ concat [
-                 xs
-                ,if mc == 0 then [] else [("micro", mc)]
-                ,if mt == 0 then [] else [("meta", mt)]
-                ]
-        
-
+fetchTagCloudImpl :: Connection -> IO [TagUsage]
+fetchTagCloudImpl c = do
+    naturals <- query_ c "SELECT tag, COUNT(1)::integer FROM entry_tag GROUP BY tag"
+    microCount <- fetchMicroCount c
+    metaCount <- fetchMetaCount c
+    let synthetics = filter ((> 0) . snd) [("micro", microCount), ("meta", metaCount)]
+    return $ map (uncurry TagUsage) $ sortBy (flip (comparing snd)) $ synthetics ++ naturals
+    
 fetchMicroCount :: Connection -> IO Int
 fetchMicroCount c = fromOnly <$> head <$> get
     where
@@ -242,32 +254,21 @@ fetchEntryIds c Last mtag = do
     fetchEntryIdsImpl c pg mtag
 
 fetchEntryIdsImpl :: Connection -> Int -> Maybe String -> IO [Only Int]
-fetchEntryIdsImpl c n mtag =
-    case mtag of
-         Just "meta" ->
-             query c "SELECT id FROM entry e, symlink s \
-                     \WHERE e.id = s.entry_id AND s.kind = 'meta' \
-                     \ORDER BY rank \
-                     \LIMIT 5 \
-                     \OFFSET ? " (Only $ n * 5 - 5)
-         Just "micro" ->
-             query c "SELECT id FROM entry e \
-                     \WHERE NOT read_more \
-                     \ORDER BY rank \
-                     \LIMIT 5 \
-                     \OFFSET ? " (Only $ n * 5 - 5)
-         Just t ->
-             query c "SELECT id FROM entry e, entry_tag et \
-                     \WHERE e.id = et.entry_id \
-                     \  AND et.tag = ? \
-                     \ORDER BY rank    \
-                     \LIMIT 5 \
-                     \OFFSET ? " (t, n * 5 - 5)
-         Nothing ->
-             query c "SELECT id FROM entry e \
-                     \ORDER BY rank          \
-                     \LIMIT 5                \
-                     \OFFSET ?" (Only $ n * 5 - 5)
+fetchEntryIdsImpl c n (Just "meta") = query c
+    "SELECT id FROM entry e, symlink s \
+    \WHERE e.id = s.entry_id AND s.kind = 'meta' \
+    \ORDER BY rank LIMIT 5 OFFSET ?" (Only $ n * 5 - 5)
+fetchEntryIdsImpl c n (Just "micro") = query c
+    "SELECT id FROM entry e \
+    \WHERE NOT read_more \
+    \ORDER BY rank LIMIT 5 OFFSET ? " (Only $ n * 5 - 5)
+fetchEntryIdsImpl c n (Just t) = query c
+    "SELECT id FROM entry e, entry_tag et \
+    \WHERE e.id = et.entry_id AND et.tag = ? \
+    \ORDER BY rank LIMIT 5 OFFSET ? " (t, n * 5 - 5)
+fetchEntryIdsImpl c n Nothing = query c
+    "SELECT id FROM entry e \
+    \ORDER BY rank LIMIT 5 OFFSET ?" (Only $ n * 5 - 5)
  
 fetchEntries :: Connection -> Index -> Maybe String -> IO [PagedEntryData]
 fetchEntries c ix mtag = fetchEntryIds c ix mtag >>= retrieve
@@ -288,30 +289,18 @@ fetchEntries c ix mtag = fetchEntryIds c ix mtag >>= retrieve
                          body     = Body sm
                         ,symlink  = (\x -> Symlink $ "entry/" ++ x) <$> sl
                         ,metalink = (\x -> Metalink $ "meta/" ++ x) <$> ml
-                        ,tags     = Tags tags
-                        ,uid      = uid
+                        ,tags = Tags tags
+                        ,uid = uid
                         ,summary  = Summary sm
                         ,title    = Title ti
-                        ,extra    = if mtag == (Just "meta") then Meta else Normal
+                        ,extra    = if mtag == Just "meta" then Meta else Normal
                         }
             return $ PED entry rm
 
--- | Retrieves a single entry at particular URL or 'Nothing' if
---   no matching entry found.
-fetchEntry :: PoolT -> String -> PageKind -> IO (Maybe SingleEntry)
-fetchEntry p ref mtag = withResource p (go ref mtag)
-    where
-        go ref Meta c = do
-            muid <- resolveMetalink c ref
-            case muid of
-                 Nothing -> return Nothing
-                 Just uid -> fetchEntryById c uid
-        go ref Normal c | all isNumber ref = fetchEntryById c (read ref)
-        go ref Normal c = do
-            muid <- resolveSymlink c ref
-            case muid of
-                 Nothing -> return Nothing
-                 Just uid -> fetchEntryById c uid
+fetchEntryImpl :: Connection -> PageKind -> String -> IO (Maybe SingleEntry)
+fetchEntryImpl c Meta ref = fetchEntryById c Meta <!!> resolveMetalink c ref
+fetchEntryImpl c Normal ref | all isNumber ref = fetchEntryById c Normal (read ref)
+fetchEntryImpl c Normal ref = fetchEntryById c Normal <!!> resolveSymlink c ref
 
 resolveSymlink :: Connection -> String -> IO (Maybe Int)
 resolveSymlink c ref = do
@@ -331,33 +320,141 @@ fetchTagsFast c uid hasMicro hasMeta = decorate <$> go
             return $ map fromOnly rs
         decorate xs = xs ++ ["micro" | hasMicro] ++ ["meta" | hasMeta]
 
-fetchEntryById :: Connection -> Int -> IO (Maybe SingleEntry)
-fetchEntryById c uid = go c
+fetchEntryById :: Connection -> PageKind -> Int -> IO (Maybe SingleEntry)
+fetchEntryById conn pk uid =  do
+    rs <- query conn
+            "SELECT body, teaser, title, read_more \
+            \     , (SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'normal') \
+            \     , (SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'meta') \
+            \FROM entry e WHERE id = ?" (Only uid)
+    case rs of
+        [] -> return Nothing
+        ((a,b,c,d,e,f):_) -> do
+            sls <- fetchSeries conn uid
+            tags <- fetchTagsFast conn uid (not d) (isJust f)
+            let entry = Entry
+                    {uid = uid, body = a, summary = b, title = c
+                    ,symlink = liftT (\x -> "entry/" ++ x) <$> e
+                    ,metalink = liftT (\x -> "meta/" ++ x) <$> f
+                    ,tags = Tags tags
+                    ,extra = pk
+                    }
+            return $ Just $ SE entry sls
+
+fetchPageImpl :: Connection -> Index -> Maybe String -> IO Page
+fetchPageImpl c ix mtag = do
+    entries <- fetchEntries c ix mtag
+    (prev, next) <- fetchPreviousNext c ix mtag
+    let selfRef = encodePageHref mtag ix
+    return (Page entries selfRef prev next)
+
+fetchRandomEntryImpl :: Connection -> IO String
+fetchRandomEntryImpl c = do
+    rs <- query_ c "SELECT id FROM entry ORDER BY random() LIMIT 1"
+    case rs of
+        [] -> return "/"
+        (Only n:_) -> formatEntryLink c n
+
+fetchRssFeedImpl :: Connection -> IO [RssEntry]
+fetchRssFeedImpl conn = get >>= mapM decorate
     where
-        go c = do
-            rs <- query c "SELECT body \
-                          \     , teaser \
-                          \     , title  \
-                          \     , (SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'normal') \
-                          \     , (SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'meta') \
-                          \     , read_more \
-                          \FROM entry e WHERE id = ?" (Only uid)
-            case rs of
-                 [] -> return Nothing
-                 [(bd,sm,ti,sl,ml,rm)] -> do
-                     sls <- fetchSeries c uid
-                     tags <- fetchTagsFast c uid (not rm) (isJust ml)
-                     let entry = Entry {
-                         body     = Body bd
-                        ,symlink  = (\x -> Symlink $ "entry/" ++ x) <$> sl
-                        ,metalink = (\x -> Metalink $ "meta/" ++ x) <$> ml
-                        ,tags     = Tags tags
-                        ,uid      = uid
-                        ,summary  = Summary sm
-                        ,title    = Title ti
-                        ,extra    = Normal
-                     }
-                     return $ Just $ SE entry sls
+        get = query_ conn
+            "SELECT e.id, e.title, e.teaser, e.md5_signature, re.date_posted AS pubtime \
+            \FROM entry e, rss_entry re                       \
+            \WHERE e.id = re.entry_id                         \
+            \ORDER BY re.date_posted DESC"
+        decorate (a,b,c,d,e) = do
+            href <- formatEntryLink conn a
+            return (Rss a b c d e href)
 
+fetchEntryIndexImpl :: Connection -> IO [EntryHash]
+fetchEntryIndexImpl c =  wrap <$$> query_ c "SELECT id, md5_signature FROM entry"
+    where
+        wrap (a,b) = EHash a b
 
+assignSymlinks :: Connection -> Int -> Maybe Symlink -> Maybe Metalink -> IO ()
+assignSymlinks c uid sl ml = clear >> addSym sl >> addMeta ml
+    where
+        clear = execute c "DELETE FROM symlink WHERE entry_id = ?" (Only uid)
+        addSym Nothing = return ()
+        addSym (Just x) = do
+            execute c "DELETE FROM symlink WHERE link = ? AND kind = 'normal'" (Only x)
+            execute c "INSERT INTO symlink(link, kind, entry_id) VALUES(?, 'normal', ?)" (x, uid)
+            return ()
+        addMeta Nothing = return ()
+        addMeta (Just x) = do
+            execute c "DELETE FROM symlink WHERE link = ? AND kind = 'meta'" (Only x)
+            execute c "INSERT INTO symlink(link, kind, entry_id) VALUES(?, 'meta', ?)" (x, uid)
+            return ()
 
+-- | Records optional data (symlinks, tags) of an entry.
+recordOptionalData :: Connection -> EntryQuery a -> Int -> IO ()
+recordOptionalData conn e uid =
+        recordTags >> recordSeries >> recordSymlinks
+    where
+        (Tags ts)      = tags e
+        (Series series) = seriesRef e
+        resetTags      = execute conn
+            "DELETE FROM entry_tag WHERE entry_id = ?"
+            (Only uid)
+        insertTag t    = execute conn
+            "INSERT INTO entry_tag(entry_id, tag) VALUES (?, ?)"
+            (uid, t::String)
+        recordTags     = resetTags >> mapM_ insertTag ts
+        recordSymlinks = assignSymlinks conn uid (symlink e) (metalink e)
+        resetSeries    = execute conn
+            "DELETE FROM series_assignment WHERE entry_id = ?"
+            (Only uid)
+        insertSeries (SeriesRef s ix) = execute conn
+            "INSERT INTO series_assignment(entry_id, series, index) \
+            \VALUES (?, ?, ?)"
+            (uid, s, ix)
+        recordSeries   = resetSeries >> mapM_ insertSeries series
+    
+updateEntryImpl :: Connection -> Int -> EntryQuery a -> IO ()
+updateEntryImpl conn uid e = do
+    execute conn "UPDATE entry SET title = ? \
+                 \               , teaser = ? \
+                 \               , body = ?   \
+                 \               , read_more = ? \
+                 \               , invisible = FALSE \
+                 \               , md5_signature = ? \
+                 \WHERE id = ?"
+                 (title e, ts, body e, rm, md5sig e, uid)
+    recordOptionalData conn e uid
+  where
+      (ts, rm) = case summary e of
+                      Just s -> (s, True)
+                      Nothing -> let (p, q) = trim $ expose $ body e in (wrap p, q)
+      trim s | length s < 600 = (s, False)
+             | otherwise = let x = reverse $ take 600 s
+                               y = reverse $ skip ' ' x
+                               z = reverse $ skip '\n' x
+                           in (if length y > length z then y else z, True)
+      skip _ [] = []
+      skip y (x:xs) | x == y = xs | otherwise = skip y xs
+
+-- | Creates a new entry and returns an assigned ID.
+createEntryImpl :: Connection -> QueryCR -> IO Int
+createEntryImpl conn e = do
+    [Only uid] <- query_ conn
+                           "SELECT id FROM (      \
+                           \   SELECT ROUND(RANDOM() * 9000000 + 1000000)::INT id \
+                           \   FROM generate_series(1,100) \
+                           \) sq WHERE NOT EXISTS ( \
+                           \   SELECT 1 FROM entry e \
+                           \   WHERE e.id = sq.id \
+                           \) LIMIT 1"
+    [Only mmx] <- query_ conn "SELECT MAX(rank) FROM entry"
+    rank <- case mmx of
+                 Nothing -> return 1
+                 Just n -> do
+                     rank <- randomRIO (1, n + 1)
+                     slideEntryRanks conn rank
+                     return rank
+    execute conn "INSERT INTO entry \
+                 \(id, title, teaser, body, read_more, invisible, rank, md5_signature) \
+                 \VALUES (?, '', '', '', FALSE, TRUE, ?, '')"
+                 (uid, rank)
+    updateEntryImpl conn uid e
+    return uid

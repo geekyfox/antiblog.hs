@@ -199,12 +199,12 @@ fullbody p = M.Body fullText
 -- | Calculates MD5 signature of the parsed entry.
 signature :: Parser -> String
 signature e = md5s $ Str $ concatMap (\f -> f e)
-        [ maybe "" expose . title
-        , maybe "" expose . summary
-        ,          expose . fullbody
-        , maybe "" expose . symlink
-        , maybe "" expose . metalink
-        ,          expose . tags
+        [maybe "" expose . title
+        ,maybe "" expose . summary
+        ,expose . fullbody
+        ,maybe "" expose . symlink
+        ,maybe "" expose . metalink
+        ,encode . tags
         , concatMap encode . series
         ]
 

@@ -2,8 +2,10 @@
 
 module Anticore.Model where
 
+import Data.Char(isDigit)
 import Data.List(intercalate)
 import Data.List.Split(splitOn)
+import Data.Maybe(listToMaybe)
 import Data.Time.Clock
 
 import Anticore.Data.Outcome
@@ -42,14 +44,11 @@ instance TaggedString Metalink where
     expose (Metalink s) = s 
     wrap = Metalink
 
-instance TaggedString Tags where
-    expose (Tags s) = unwords s
-    wrap = Tags . words
+instance Encodable Tags where
+    encode (Tags ts) = unwords ts
+    decode = OK . Tags . words
 
-data SeriesRef = SeriesRef {
-      seriesName  :: String
-    , seriesIndex :: Int
-}
+data SeriesRef = SeriesRef String Int
 
 instance Show SeriesRef where
     show (SeriesRef s ix) = concat [
@@ -114,3 +113,66 @@ seriesRef :: Entry a b c TransportExtra -> SeriesRefList
 seriesRef e = let TREX _ x = extra e in x
 
 type EntryFS = Entry (Maybe Int) (Maybe Summary) (Maybe Title) TransportExtra
+
+data SeriesLinks = SL {
+    linkFirst :: String,
+    linkPrev  :: Maybe String,
+    linkNext  :: Maybe String,
+    linkLast  :: String
+    }
+
+data Index = Number Int | Last deriving Show
+
+parseIndex :: String -> Maybe Index
+parseIndex "last" = Just Last
+parseIndex x | all isDigit x = Just $ Number $ read x
+parseIndex _ = Nothing
+
+parseRef :: String -> (Index, Maybe String)
+parseRef s = case parseIndex s of
+                  Just ix -> (ix, Nothing)
+                  Nothing -> (Number 1, Just s)
+
+-- | Skeleton type for a single blog entry in different contexts.
+type EntryData = Entry Int Summary Title PageKind
+
+data PagedEntryData = PED EntryData Bool
+
+-- | Type of rendered webpage. Currently only used to render correct
+--   hyperlinks on \/meta\/ pages.
+data PageKind = 
+    -- | \"Normal\" page (i.e. \/entry\/* or \/page\/*)
+    Normal
+    -- | \"Meta\" page (i.e. \/meta\/*)
+  | Meta
+  deriving Show
+
+data SingleEntry = SE EntryData [SeriesLinks]
+
+data Page = Page {
+      entries  :: [PagedEntryData]
+    -- | Link to page itself.
+    , own      :: !String
+    -- | Link to the previous page (if any).
+    , previous :: Maybe String
+    -- | Link to the next page (if any).    
+    , next     :: Maybe String
+    }
+
+pageKind :: EntryData -> PageKind
+pageKind = extra
+
+class RenderEntry e where
+    unbox       :: e -> EntryData
+    readMore    :: e -> Bool
+    seriesLinks :: e -> Maybe SeriesLinks
+
+instance RenderEntry SingleEntry where
+    unbox      (SE x _) = x
+    readMore    _        = False
+    seriesLinks (SE _ y) = listToMaybe y
+
+instance RenderEntry PagedEntryData where
+    unbox      (PED x _) = x
+    readMore    (PED _ y) = y
+    seriesLinks _         = Nothing
