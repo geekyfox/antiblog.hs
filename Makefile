@@ -10,7 +10,7 @@ anticore/stamp: anticore/src/Anticore/**/*hs
 	cd anticore && cabal install
 	touch anticore/stamp
 
-antihost/stamp: anticore/stamp antihost/src/Antihost/*
+antihost/stamp: anticore/stamp antihost/src/Antihost/* antihost/src/*
 	cd antihost && cabal install
 	touch antihost/stamp
 

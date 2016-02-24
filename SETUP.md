@@ -25,8 +25,6 @@ yourself.
      rewritten somewhere between the browser and the webapp, care is taken of
      "unrewriting it back."
   * That's why webapp doesn't bother about serving static content.
-* It is designed to run on top of PostgreSQL 9.3+.
-  * That's why there's nothing like a "database-agnostic layer."
 * It is designed to be controlled by supervisord.
   * That gives the liberty of not worrying that webapp process may
      ocassionally terminate (restart is automatic and takes less than a
@@ -40,19 +38,6 @@ yourself.
 Using an alternative reverse proxy or process supervisor shouldn't be
 hard, consult the documentation to your tool of choice.
 
-Using pre-9.3 postgres is possible if you workaround the lack of materialized
-views support.
-
-* Simple hotfix for that is to replace "`CREATE MATERIALIZED VIEW`"
- with  "`CREATE VIEW`" in `schema/views.sql` and comment out
- "`REFRESH MATERIALIZED VIEW ...`"  lines in `schema/functions.sql`.
- That'd come with a performance penalty though.
-
-* Alternative is to replace materialized views with tables and implement their refreshes
- manually in `refresh_materialized_views()` function. This shouldn't be very
- complicated, but I'd still suggest you to consider installing a newer version
- of postgres.
-
 Running with no proxy, or no supervisor, or on non-postgres database, is
 theoretically possible if you have enough determination to fill all gaps
 and fix all breaks ;-)
@@ -61,7 +46,6 @@ and fix all breaks ;-)
 
 1. Install postgresql, nginx, supervisord, ghc, cabal-install.
 
- postgres must be 9.3+ (materialized views support; see above),
  cabal-install must be 1.18+ (sandboxes support), no special version
  requirements for other components.
 
@@ -69,15 +53,12 @@ and fix all breaks ;-)
   
  As postgres user:
  ```
-psql
+$ sudo -u postgres psql
 create role 'antiblog' identified by 'password';
 create database 'antiblog';
+grant all privileges on database 'antiblog' to 'antiblog';
 \q
 exit
- ```
- As yourself, edit `~/.pgpass` file. Add a line
- ```
-localhost:5432:antiblog:antiblog:password
  ```
  If you care about security, pick safer password than just 'password'.
  And also configure your firewall to restrict external access to port 5432.

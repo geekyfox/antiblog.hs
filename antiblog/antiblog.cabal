@@ -30,7 +30,7 @@ executable antiblog
                       ,bytestring        >=0.10.6.0   && <0.11
                       ,http-types        >=0.8.6      && <0.9
                       ,network-uri       >=2.6.0.0    && <2.7
-                      ,postgresql-simple >=0.4.10.0   && <0.5
+                      -- ,postgresql-simple >=0.4.10.0   && <0.5
                       ,resource-pool     >=0.2.3.2    && <0.3
                       ,rss               >=3000.2.0.4 && <3000.3
                       ,scotty            ==0.11.0

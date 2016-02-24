@@ -37,12 +37,19 @@ import Anticore.Control.Flip((<$$>),(<!!>))
 import Anticore.Data.Tagged
 import Anticore.Model
 
+import Antihost.Schema(schema)
+
+import Concierge(arrange)
+
 -- | Shorthand type name for a pool of PostgreSQL connections.
 type PoolT = Pool Connection
 
 -- | Creates a connection pool with a given connstring.
 connect :: String -> IO PoolT
-connect cs = createPool (connectPostgreSQL $ pack cs) close 1 30 10
+connect cs = do
+    db <- createPool (connectPostgreSQL $ pack cs) close 1 30 10
+    withResource db (`arrange` schema)
+    return db
 
 createEntry :: PoolT -> QueryCR -> IO ReplyCR
 createEntry p q = AM <$> withResource p (`createEntryImpl` q)
