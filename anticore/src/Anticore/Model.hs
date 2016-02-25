@@ -90,24 +90,50 @@ data Entry a b c d = Entry {
     -- | Body of the entry.
      body :: Body
     -- | Symbolic link (i.e. http://hostname\/entry\/\<symlink\>).
-    ,symlink   :: Maybe Symlink
+    ,symlink :: Maybe Symlink
     -- | Meta-symlink (i.e. http://hostname\/meta\/\<symlink\>). 
-    ,metalink  :: Maybe Metalink
+    ,metalink :: Maybe Metalink
     -- | List of tags
-    ,tags      :: Tags
+    ,tags :: Tags
     -- | Numeric ID, unique within system.
-    , uid       :: a
+    ,uid :: a
     -- | Short summary.
-    , summary   :: b
+    ,summary :: b
     -- | Title.
-    , title     :: c
+    ,title :: c
     ,extra :: d
     } deriving Show
 
 data TransportExtra = TREX String SeriesRefList
 
-md5sig :: Entry a b c TransportExtra -> String
-md5sig e = let TREX x _ = extra e in x
+class Hashed a where
+    md5sig :: a -> String
+
+class Identified a where
+    entryId :: a -> Maybe Int
+
+instance (Hashed a, Hashed b) => Hashed (Either a b) where
+    md5sig (Left x) = md5sig x
+    md5sig (Right x) = md5sig x
+
+instance (Identified a, Identified b) => Identified (Either a b) where
+    entryId (Left x) = entryId x
+    entryId (Right x) = entryId x
+
+instance Identified Int where
+    entryId = Just
+
+instance (Identified a) => Identified (Maybe a) where
+    entryId x = x >>= entryId
+
+instance Hashed TransportExtra where
+    md5sig (TREX s _) = s
+
+instance (Hashed d) => Hashed (Entry a b c d) where
+    md5sig = md5sig . extra
+
+instance (Identified a) => Identified (Entry a b c d) where
+    entryId = entryId . uid
 
 seriesRef :: Entry a b c TransportExtra -> SeriesRefList
 seriesRef e = let TREX _ x = extra e in x
@@ -176,3 +202,13 @@ instance RenderEntry PagedEntryData where
     unbox      (PED x _) = x
     readMore    (PED _ y) = y
     seriesLinks _         = Nothing
+
+data EntryRedirect = RED Int String String (Maybe Symlink) (Maybe Metalink)
+
+instance Hashed EntryRedirect where
+    md5sig (RED _ _ s _ _) = s
+    
+instance Identified EntryRedirect where
+    entryId (RED n _ _ _ _) = Just n
+
+redirectUrl (RED _ s _ _ _) = s

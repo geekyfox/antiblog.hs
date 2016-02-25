@@ -100,6 +100,15 @@ encodeEntry e = mapMaybe wrap optionals ++ mandatories
             ,("series", encode $ seriesRef e)
             ]
 
+encodeRedirect :: EntryRedirect -> [(String, String)]
+encodeRedirect (RED a b c d e) =
+        [("id", show a)
+        ,("url", b)
+        ,("signature", c)
+        ]
+        ++ (case d of { Nothing -> [] ; Just s -> [("symlink", expose s)] })
+        ++ (case e of { Nothing -> [] ; Just s -> [("metalink", expose s)] })
+
 -- | Updates an entry.
 updateEntry :: Endpoint -> EntryFS -> IO (Outcome ReplyUP)
 updateEntry sys e = mkPostRequest "update" sys (encodeEntry e) >>= query
@@ -113,3 +122,5 @@ promoteEntry sys uid = mkPostRequest "promote" sys params >>= query
     where
         params = [("id", show uid)]
 
+updateRedirect :: Endpoint -> EntryRedirect -> IO (Outcome ReplyUP)
+updateRedirect sys e = mkPostRequest "redirect" sys (encodeRedirect e) >>= query

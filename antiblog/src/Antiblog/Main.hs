@@ -19,6 +19,7 @@ import Anticore.Api
 import Anticore.Data.Outcome
 import Anticore.Model
 import Anticore.Data.Tagged
+import Anticore.Control.Flip
 
 import Antihost.Database
 
@@ -32,13 +33,15 @@ getNotFound db cfg = renderNotFound <$> augm
         augm = liftM (\ts -> comprise cfg ts ()) tags
 
 -- | Provides an entry page at given URL.
-getEntry :: PoolT -> ConfigSRV -> String -> PageKind -> IO T.Text
-getEntry db cfg uid pk = entry >>= maybe notFound render
-    where
-        entry = fetchEntry db pk uid
-        tags = fetchTagCloud db
-        notFound = getNotFound db cfg
-        render e = renderEntry <$> (\ts -> comprise cfg ts e) <$> tags
+getEntry :: PoolT -> ConfigSRV -> String -> PageKind -> IO (Either T.Text String)
+getEntry db cfg uid pk = do
+    result <- fetchEntry db pk uid
+    case result of
+        Nothing -> Left <$> getNotFound db cfg
+        Just (Right redirect) -> return (Right redirect)
+        Just (Left entry) -> do
+            tags <- fetchTagCloud db
+            return $ Left $ renderEntry (comprise cfg tags entry)
 
 -- | Provides a list page at given URL.
 getPage :: PoolT -> ConfigSRV -> Index -> Maybe String -> IO T.Text
@@ -126,12 +129,17 @@ decodeEntry muid = do
 decodeEntryPromote :: ActionM Int
 decodeEntryPromote = param "id"
 
+decodeEntryRedirect :: ActionM EntryRedirect
+decodeEntryRedirect = RED <$>
+    param "id" <*> param "url" <*> param "signature" <*>
+    (wrap <$$> mparam "symlink") <*> (wrap <$$> mparam "metalink")
+
 -- | Main execution loop.
 webloop :: PoolT -> ConfigSRV -> IO ()
 webloop db sys =
     let
         renderPage ix mtag = liftIO (getPage db sys ix mtag) >>= html
-        renderEntry ref pk = liftIO (getEntry db sys ref pk) >>= html
+        renderEntry ref pk = liftIO (getEntry db sys ref pk) >>= either html (redirect . T.pack)
         invoke_ f  = liftIO (f db sys)
     in scotty (httpPort sys) $ do
         get "/entry/random" $
@@ -173,6 +181,10 @@ webloop db sys =
             uid <- decodeEntryPromote
             result <- liftIO (promoteEntry db uid)
             json $ AM result
+        post "/api/redirect" $ secure sys $ do
+            e <- decodeEntryRedirect
+            result <- liftIO (updateRedirect db e)
+            json result
         notFound $ do
             status notFound404
             invoke_ getNotFound >>= html

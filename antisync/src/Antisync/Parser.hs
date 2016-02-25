@@ -95,12 +95,12 @@
 --     @summary@, @footnote@ and @code@ blocks.
 --
 
-
 module Antisync.Parser where
 
-import Data.Hash.MD5
 import Control.Monad(foldM)
+import Data.Hash.MD5
 import Data.List(intercalate)
+import Data.Maybe(isJust,fromJust)
 import Data.String.Utils(strip)
 
 import Anticore.Data.Outcome
@@ -143,35 +143,37 @@ data BodyLine = Raw String
 
 -- | Accumulator for parsed data.
 data Parser = P {
-      state     :: ParserState
-    , system    :: SystemName
-    , publish   :: Bool
-    , title     :: Maybe M.Title
-    , summary   :: Maybe M.Summary
-    , uid       :: Maybe Int
-    , body      :: [BodyLine]
+      state :: ParserState
+    , system :: SystemName
+    , publish :: Bool
+    , title :: Maybe M.Title
+    , summary :: Maybe M.Summary
+    , uid :: Maybe Int
+    , body :: [BodyLine]
     , footnotes :: [String]
-    , symlink   :: Maybe M.Symlink
-    , metalink  :: Maybe M.Metalink
-    , tags      :: M.Tags
-    , series    :: [M.SeriesRef]
+    , symlink :: Maybe M.Symlink
+    , metalink :: Maybe M.Metalink
+    , tags :: M.Tags
+    , series :: [M.SeriesRef]
+    , redirect :: Maybe String
 }
 
 -- | Initializes a new parser.
 mk :: SystemName -> Parser
 mk sys = P {
-      state     = Body
-    , system    = sys
-    , publish   = False
-    , title     = Nothing
-    , summary   = Nothing
-    , uid       = Nothing
-    , body      = []
-    , footnotes = []
-    , symlink   = Nothing
-    , metalink  = Nothing
-    , tags      = M.Tags []
-    , series    = []
+    state = Body
+    ,system = sys
+    ,publish = False
+    ,title = Nothing
+    ,summary = Nothing
+    ,uid = Nothing
+    ,body = []
+    ,footnotes = []
+    ,symlink = Nothing
+    ,metalink = Nothing
+    ,tags = M.Tags []
+    ,series = []
+    ,redirect = Nothing
 }
 
 trimWhite :: [BodyLine] -> [BodyLine]
@@ -198,6 +200,11 @@ fullbody p = M.Body fullText
 
 -- | Calculates MD5 signature of the parsed entry.
 signature :: Parser -> String
+signature e | isJust (redirect e) = md5s $ Str $ concatMap (\f -> f e)
+        [fromJust . redirect
+        ,maybe "" expose . symlink
+        ,maybe "" expose . metalink
+        ]
 signature e = md5s $ Str $ concatMap (\f -> f e)
         [maybe "" expose . title
         ,maybe "" expose . summary
@@ -205,23 +212,26 @@ signature e = md5s $ Str $ concatMap (\f -> f e)
         ,maybe "" expose . symlink
         ,maybe "" expose . metalink
         ,encode . tags
-        , concatMap encode . series
+        ,concatMap encode . series
         ]
 
 -- | Final stage of parsing, convert parser state into an `EntryFS`.
-buildFS :: Parser -> Outcome M.EntryFS
+buildFS :: Parser -> Outcome (Either M.EntryFS M.EntryRedirect)
 buildFS p
-    | not $ publish p       = Skip "Not for publishing"
+    | not $ publish p = Skip "Not for publishing"
+    | isJust (redirect p) = case uid p of
+        Just n -> OK $ Right $ M.RED n (fromJust $ redirect p) (signature p) (symlink p) (metalink p)
+        Nothing -> Fail "ID is missing in redirected entry"
     | null $ expose content = Fail "Body is missing"
-    | otherwise             = OK M.Entry {
-              M.title     = title p
-            , M.summary   = summary p
-            , M.uid       = uid p
-            , M.body      = content
-            , M.symlink   = symlink p
+    | otherwise = OK $ Left $ M.Entry {
+              M.title = title p
+            , M.summary = summary p
+            , M.uid = uid p
+            , M.body = content
+            , M.symlink = symlink p
             , M.metalink  = metalink p
-            , M.tags      = tags p
-            , M.extra     = M.TREX (signature p) (M.Series $ series p)
+            , M.tags = tags p
+            , M.extra = M.TREX (signature p) (M.Series $ series p)
             }
   where
       content = fullbody p
@@ -347,12 +357,16 @@ parseLine p line =
         impl ["series", name, index] =
              case readInt index of
                   Just num -> addSeries p name num
-                  _        -> Fail $ "Bad series index: " ++ index
+                  _ -> Fail $ "Bad series index: " ++ index
+        impl ["redirect", env, _] | env /= expose (system p) =
+            OK p
+        impl ["redirect", env, href] =
+            OK p { redirect = Just href }
         impl _ = Fail $ "Unknown directive: " ++ line
     in case words line of
          ("##":"antiblog":rest) -> impl rest
          _ -> OK $ append p line
 
 -- | Parses the whole text.
-parseText :: SystemName -> [String] -> Outcome M.EntryFS
+parseText :: SystemName -> [String] -> Outcome (Either M.EntryFS M.EntryRedirect)
 parseText sys txt = foldM parseLine (mk sys) txt >>= buildFS

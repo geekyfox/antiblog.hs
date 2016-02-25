@@ -33,18 +33,18 @@ import Antisync.Config
 import Antisync.Parser(parseText)
 
 -- | Reads and parses a file.
-loadFile :: SystemName -> FilePath -> IO (Outcome EntryFS)
+loadFile :: SystemName -> FilePath -> IO (Outcome (Either EntryFS EntryRedirect))
 loadFile sys fpath =  
     let
         drain handle = parseText sys <$> lines <$> hGetContents handle
         openAndDrain = withBinaryFile fpath ReadMode drain
-        retreat      = return $ Fail "File too big"
+        retreat = return $ Fail "File too big"
     in do
-        fsize <- liftM fileSize $ getFileStatus fpath
+        fsize <- fileSize <$> getFileStatus fpath
         if fsize < 100000 then openAndDrain else retreat
 
 -- | Shorthand type for the result of reading multiple files.
-type DataFS = [(FilePath, Outcome EntryFS)]
+type DataFS = [(FilePath, Outcome (Either EntryFS EntryRedirect))]
 
 -- | Reads and parses multiple files.
 loadFiles :: SystemName -> [FilePath] -> IO DataFS
@@ -73,20 +73,21 @@ loadDir sys dir = directoryScan dir >>= loadFiles sys
 --
 --       * `Fail` : error occured
 --
-decideStatus :: EntryIndex -> EntryFS -> Outcome String
+decideStatus :: (Hashed a, Identified a) => EntryIndex -> a -> Outcome String
 decideStatus srv e
     | isNothing mfid  = OK "New entry"
     | isNothing mssig = Fail "No matching entry on server"
-    | ssig == fsig    = Skip "Not modified"
-    | otherwise       = OK "Entry modified"
-  where mfid  = uid e
-        fid   = fromJust mfid
-        mssig = lookup fid srv
-        ssig  = fromJust mssig
-        fsig  = md5sig e
+    | ssig == fsig = Skip "Not modified"
+    | otherwise = OK "Entry modified"
+  where
+      mfid  = entryId e
+      fid = fromJust mfid
+      mssig = lookup fid srv
+      ssig  = fromJust mssig
+      fsig  = md5sig e
 
 -- | Monad-ish version of `decideStatus`.
-decideStatusM :: EntryIndex -> Outcome EntryFS -> Outcome String
+decideStatusM :: (Hashed a, Identified a) => EntryIndex -> Outcome a -> Outcome String
 decideStatusM ix pe = pe >>= decideStatus ix
 
 -- | Shorthand type for statuses of multiple files.
@@ -127,17 +128,18 @@ injectId sys fpath id = load >>= save
 syncOne :: Endpoint -> EntryIndex -> FilePath -> IO (Outcome ())
 syncOne sys srv fp = submit <!!> approved
     where
-        loaded, approved :: IO (Outcome EntryFS)
+        loaded, approved :: IO (Outcome (Either EntryFS EntryRedirect))
         loaded = loadFile (systemName sys) fp
         approved = promO approve <!!> loaded
-        approve :: EntryFS -> Outcome EntryFS
+        approve :: (Hashed a, Identified a) => a -> Outcome a
         approve e = decideStatus srv e >> return e
         save :: Int -> IO ()
         save = injectId sys fp
-        submit :: EntryFS -> IO (Outcome ())
-        submit e
-          | isJust $ uid e = unfold <$$> updateEntry sys e
-          | otherwise = promI save <!!> unfold <$$> createEntry sys e
+        submit :: Either EntryFS EntryRedirect -> IO (Outcome ())
+        submit (Left e)
+            | isJust $ uid e = unfold <$$> updateEntry sys e
+            | otherwise = promI save <!!> unfold <$$> createEntry sys e
+        submit (Right e) = unfold <$$> updateRedirect sys e
         unfold (AM x) = x
 
 -- | Syncronizes a list of files. Reports progress at given
@@ -172,7 +174,7 @@ promote :: [FilePath] -> Endpoint -> IO ()
 promote files sys = mapM_ workOne files
     where
         theFile :: FilePath -> IO (Outcome EntryFS)
-        theFile = loadFile (systemName sys)
+        theFile f = (promO onlyEntry) <!!> loadFile (systemName sys) f
         workOne :: FilePath -> IO ()
         workOne f = (process <!!> theFile f) >>= render f
         process :: EntryFS -> IO (Outcome ReplyPR)
@@ -181,6 +183,9 @@ promote files sys = mapM_ workOne files
         extractId = fromMaybe "ID is missing" . uid
         render :: FilePath -> Outcome a -> IO ()
         render f p = putStrLn $ f ++ " => " ++ describe (const "OK") p
+        onlyEntry :: Either EntryFS a -> Outcome EntryFS
+        onlyEntry (Left x) = OK x
+        onlyEntry _ = Skip "No promotion of redirected entries"
 
 main :: IO ()
 main = decideAction >>= exec

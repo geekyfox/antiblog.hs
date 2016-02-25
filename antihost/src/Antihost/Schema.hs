@@ -67,5 +67,12 @@ seriesAssignment = change "series_assignment" [
         \)"
     ,requires entry
     ]
+    
+redirectColumn :: Change
+redirectColumn = change "redirect_column" [
+    hasDDL
+        "ALTER TABLE entry ADD COLUMN redirect_url VARCHAR NULL"
+    ,requires entry
+    ]
 
-schema = [entry, rssEntry, symlink, entryTag, seriesAssignment]
+schema = [entry, rssEntry, symlink, entryTag, seriesAssignment, redirectColumn]
