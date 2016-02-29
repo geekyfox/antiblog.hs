@@ -273,7 +273,7 @@ fetchMicroCount :: Connection -> IO Int
 fetchMicroCount conn = do
     [Only x] <- query_ conn
         "SELECT COUNT(1)::integer FROM entry \
-        \WHERE NOT read_more AND NOT invisible"
+        \WHERE teaser = body AND NOT invisible"
     return x
 
 fetchMetaCount :: Connection -> IO Int
@@ -297,7 +297,7 @@ fetchEntryIdsImpl c n (Just "meta") = query c
     \ORDER BY rank LIMIT 5 OFFSET ?" (Only $ n * 5 - 5)
 fetchEntryIdsImpl c n (Just "micro") = query c
     "SELECT id FROM entry e \
-    \WHERE NOT read_more AND NOT invisible \
+    \WHERE teaser = body AND NOT invisible \
     \ORDER BY rank LIMIT 5 OFFSET ? " (Only $ n * 5 - 5)
 fetchEntryIdsImpl c n (Just t) = query c
     "SELECT id FROM entry e, entry_tag et \
@@ -317,16 +317,16 @@ fetchEntries c ix mtag = fetchEntryIds c ix mtag >>= retrieve
                 "SELECT id, teaser, title \
                 \,(SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'normal') \
                 \,(SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'meta') \
-                \,read_more \
+                \, (body = teaser) \
                 \FROM entry e WHERE id IN ? ORDER BY rank" (Only $ In $ map fromOnly ids)
             mapM digest rs
-        digest (uid,sm,ti,sl,ml,rm) = do
-            tags <- fetchTagsFast c uid (not rm) (isJust ml)
+        digest (uid,sm,ti,sl,ml,micro) = do
+            tags <- fetchTagsFast c uid micro (isJust ml)
             let content = StoredContent ti (Body sm) (Summary sm) tags
             let symlink  = (\x -> Symlink $ "entry/" ++ x) <$> sl
             let metalink = (\x -> Metalink $ "meta/" ++ x) <$> ml
             let pageKind = if mtag == Just "meta" then Meta else Normal
-            let extra = PagedExtra symlink metalink pageKind rm
+            let extra = PagedExtra symlink metalink pageKind
             return $ Entry uid content extra
 
 fetchEntryImpl :: Connection -> PageKind -> String -> IO (Maybe (Either SingleEntry String))
@@ -360,20 +360,21 @@ fetchTagsFast c uid hasMicro hasMeta = decorate <$> go
 fetchEntryById :: Connection -> PageKind -> Int -> IO (Maybe (Either SingleEntry String))
 fetchEntryById conn pk uid =  do
     rs <- query conn
-            "SELECT redirect_url, body, teaser, title, read_more \
+            "SELECT redirect_url, body, teaser, title \
             \     , (SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'normal') \
             \     , (SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'meta') \
             \FROM entry e WHERE id = ?" (Only uid)
     case rs of
         [] -> return Nothing
-        ((Just a, _, _, _, _, _, _):_) ->
+        ((Just a, _, _, _, _, _):_) ->
             return $ Just $ Right a
-        ((Nothing,a,b,c,d,e,f):_) -> do
+        ((Nothing, bd, ts, ti, sl, ml):_) -> do
             sls <- fetchSeries conn uid
-            tags <- fetchTagsFast conn uid (not d) (isJust f)
-            let content = StoredContent c a b tags
-            let symlink = liftT (\x -> "entry/" ++ x) <$> e
-            let metalink = liftT (\x -> "meta/" ++ x) <$> f
+            let rm = (expose bd) /= (expose ts)
+            tags <- fetchTagsFast conn uid rm (isJust ml)
+            let content = StoredContent ti bd ts tags
+            let symlink = liftT (\x -> "entry/" ++ x) <$> sl
+            let metalink = liftT (\x -> "meta/" ++ x) <$> ml
             let extra = SingleExtra symlink metalink pk sls
             return $ Just $ Left $ Entry uid content extra
 
@@ -451,22 +452,22 @@ recordOptionalData conn e uid = do
 -- updateEntryImpl :: (HasHash a) => Connection -> Int -> Entry a StoredContent [SeriesRef] -> IO ()
 updateEntryImpl conn uid e = do
     execute conn
-        "UPDATE entry SET title = ?, teaser = ?, body = ?, read_more = ? \
+        "UPDATE entry SET title = ?, teaser = ?, body = ? \
         \,invisible = FALSE, md5_signature = ?, redirect_url = NULL \
         \WHERE id = ?"
-        (title e, ts, body e, rm, md5sig e, uid)
+        (title e, ts, body e, md5sig e, uid)
     recordOptionalData conn e uid
   where
-      (ts, rm) = case nonEmpty $ summary e of
-                      Just s -> (s, True)
-                      Nothing -> let (p, q) = trim $ expose $ body e in (wrap p, q)
+      ts = case nonEmpty $ summary e of
+                      Just s -> s
+                      Nothing -> wrap $ trim $ expose $ body e
       trim s
-          | length s < 600 = (s, False)
+          | length s < 600 = s
           | otherwise = let
                       x = reverse $ take 600 s
                       y = reverse $ skip ' ' x
                       z = reverse $ skip '\n' x
-                in (if length z > 100 then z else y, True)
+                in if length z > 100 then z else y
       skip _ [] = []
       skip y (x:xs) | x == y = xs | otherwise = skip y xs
 
@@ -474,7 +475,7 @@ updateRedirectImpl :: Connection -> EntryRedirect -> IO ()
 updateRedirectImpl conn r = do
     execute conn
         "UPDATE entry SET title = '', teaser = '', body = '' \
-        \,read_more = TRUE, invisible = TRUE, md5_signature = ? \
+        \, invisible = TRUE, md5_signature = ? \
         \,redirect_url = ? \
         \WHERE id = ?"
         (md5sig r, permalink r, entryId r)
@@ -500,8 +501,8 @@ createEntryImpl conn e = do
                      slideEntryRanks conn rank
                      return rank
     execute conn "INSERT INTO entry \
-                 \(id, title, teaser, body, read_more, invisible, rank, md5_signature, redirect_url) \
-                 \VALUES (?, '', '', '', FALSE, TRUE, ?, '', NULL)"
+                 \(id, title, teaser, body, invisible, rank, md5_signature, redirect_url) \
+                 \VALUES (?, '', '', '', TRUE, ?, '', NULL)"
                  (uid, rank)
     updateEntryImpl conn uid e
     return uid

@@ -16,6 +16,10 @@ instance Identified Int where entryId = id
 newtype Title = Title String deriving (Show, TaggedString)
 class HasTitle a where title :: a -> Title
 
+-- | Wrapper type for entry body.
+newtype Body = Body String deriving (Show, TaggedString)
+class HasBody a where body :: a -> Body
+
 -- | Wrapper type for entry summary.
 newtype Summary  = Summary String deriving (Show, TaggedString)
 class HasSummary a where summary :: a -> Summary
@@ -27,10 +31,6 @@ class HasSymlink a where symlink :: a -> Maybe Symlink
 -- | Wrapper type for entry "meta" symlink.
 newtype Metalink = Metalink String deriving (Show, TaggedString)
 class HasMetalink a where metalink :: a -> Maybe Metalink
-
--- | Wrapper type for entry body.
-newtype Body = Body String deriving (Show, TaggedString)
-class HasBody a where body :: a -> Body
 
 -- | Wrapper type for entry tags.
 newtype Tag = Tag String deriving (Show, TaggedString)
@@ -123,22 +123,14 @@ parseRef s = case parseIndex s of
 class HasSeriesLinks a where
     seriesLinks :: a -> [SeriesLinks]
 
-class HasReadMore a where
-    readMore :: a -> Bool
+readMore :: (HasBody a, HasSummary a) => a -> Bool
+readMore x = (expose $ body x) == (expose $ summary x)
 
-instance (HasReadMore c) => HasReadMore (Entry a b c) where
-    readMore = readMore . extra
+data PagedExtra = PagedExtra (Maybe Symlink) (Maybe Metalink) PageKind
 
-data PagedExtra = PagedExtra (Maybe Symlink) (Maybe Metalink) PageKind Bool
-
-instance HasSymlink PagedExtra where symlink (PagedExtra a _ _ _) = a
-instance HasMetalink PagedExtra where metalink (PagedExtra _ b _ _) = b
-
-instance HasPageKind PagedExtra where
-    pageKind (PagedExtra _ _ c _) = c
-
-instance HasReadMore PagedExtra where
-    readMore (PagedExtra _ _ _ d) = d
+instance HasSymlink PagedExtra where symlink (PagedExtra a _ _) = a
+instance HasMetalink PagedExtra where metalink (PagedExtra _ b _) = b
+instance HasPageKind PagedExtra where pageKind (PagedExtra _ _ c) = c
 
 instance HasSeriesLinks PagedExtra where
     seriesLinks _ = []
@@ -150,7 +142,6 @@ instance HasSymlink SingleExtra where symlink (SingleExtra a _ _ _) = a
 instance HasMetalink SingleExtra where metalink (SingleExtra _ b _ _) = b
 instance HasPageKind SingleExtra where pageKind (SingleExtra _ _ c _) = c
 instance HasSeriesLinks SingleExtra where seriesLinks (SingleExtra _ _ _ d) = d
-instance HasReadMore SingleExtra where readMore _ = False
 
 type SingleEntry = Entry Int StoredContent SingleExtra
 
