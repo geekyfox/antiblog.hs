@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | HTTP API client.
@@ -9,6 +10,9 @@ module Antisync.ApiClient where
 import Control.Applicative
 import Control.Arrow((***))
 import Control.Exception(catch)
+#if __GLASGOW_HASKELL__ < 706
+import Prelude hiding (catch)
+#endif
 import Control.Monad(liftM)
 import Data.Aeson
 import Data.Aeson.Types(Pair)
