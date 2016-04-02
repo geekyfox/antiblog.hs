@@ -19,11 +19,11 @@ import System.IO(IOMode(ReadMode,WriteMode), withBinaryFile)
 import System.IO.Strict(hGetContents)
 import System.IO.UTF8(hPutStr)
 import System.Posix (fileSize, getFileStatus)
+import Skulk.Deep
+import Skulk.Outcome
 
 import Common.Api
 import Common.Model
-import Utils.Control.Flip
-import Utils.Data.Outcome
 import Utils.Data.Tagged
 
 import Antisync.ApiClient
@@ -122,17 +122,17 @@ injectId sys fpath id = load >>= save
 
 -- | Synchronizes single file with remote server.
 syncOne :: Endpoint -> EntryIndex -> FilePath -> IO (Outcome ())
-syncOne sys srv fp = submit <!!> approved
+syncOne sys srv fp = approved >>>= submit
     where
         loaded, approved :: IO (Outcome File)
         loaded = loadFile (systemName sys) fp
-        approved = promO approve <!!> loaded
+        approved = loaded >>== approve
         approve :: File -> Outcome File
         approve e = decideStatus srv e >> return e
         save :: Int -> IO ()
         save = injectId sys fp
         submit :: File -> IO (Outcome ())
-        submit (New e) = promI save <!!> unfold <$$> createEntry sys e
+        submit (New e) = (unfold <$$> createEntry sys e) >=>= save
         submit (Stored e) = unfold <$$> updateEntry sys e
         submit (Redirect e) = unfold <$$> updateRedirect sys e
         unfold (AM x) = x
@@ -169,9 +169,9 @@ promote :: [FilePath] -> Endpoint -> IO ()
 promote files sys = mapM_ workOne files
     where
         theFile :: FilePath -> IO (Outcome StoredEntry)
-        theFile f = promO onlyEntry <!!> loadFile (systemName sys) f
+        theFile f = loadFile (systemName sys) f >>== onlyEntry
         workOne :: FilePath -> IO ()
-        workOne f = (process <!!> theFile f) >>= render f
+        workOne f = theFile f >>>= process >>= render f
         process :: StoredEntry -> IO (Outcome ReplyPR)
         process x = promoteEntry sys $ entryId x
         render :: FilePath -> Outcome a -> IO ()

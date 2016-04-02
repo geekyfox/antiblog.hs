@@ -36,8 +36,9 @@ import Data.List(find)
 import Data.String
 import qualified Data.Text as T
 
+import Skulk.Outcome
+
 import Common.Config
-import Utils.Data.Outcome
 import Utils.Data.Tagged
 
 -- | Typesafe wrapper around the name of the system.

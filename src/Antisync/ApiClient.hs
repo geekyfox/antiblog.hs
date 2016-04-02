@@ -24,9 +24,10 @@ import Network.HTTP.Client
 import Network.HTTP.Types.Header
 import Network.HTTP.Types.Status
 
+import Skulk.Outcome
+
 import Common.Api
 import Common.Model
-import Utils.Data.Outcome
 import Utils.Data.Tagged
 
 import Antisync.Config

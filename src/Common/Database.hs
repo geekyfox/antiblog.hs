@@ -30,14 +30,14 @@ import Data.Pool(Pool, withResource, createPool)
 import Database.PostgreSQL.Simple hiding (connect)
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.ToField
-       
+import Skulk.Deep((<$$>))
+
 import GHC.Int
 import System.Random(randomRIO)
 
 import Common.Api
 import Common.Model
 import Common.Schema(schema)
-import Utils.Control.Flip((<$$>))
 import Utils.Data.Tagged
 
 import Utils.Concierge(arrange)

@@ -103,12 +103,18 @@ import Data.List(intercalate)
 import Data.Maybe(isJust,fromJust)
 import Data.String.Utils(strip)
 
-import Utils.Data.Outcome
+import Skulk.Outcome
+
 import Utils.Data.Tagged
 
 import qualified Common.Model as M
 
 import Antisync.Config(SystemName)
+
+readInt :: String -> Maybe Int
+readInt s = case reads s of
+                 [(num, "")] -> Just num
+                 _           -> Nothing
 
 -- | Current state of the parser that specifies what kind of
 --   text is the current non-command line as well as what state

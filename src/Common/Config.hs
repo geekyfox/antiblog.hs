@@ -27,7 +27,8 @@ import qualified Data.Text as T
 import System.Directory(getHomeDirectory)
 import System.FilePath.Posix(combine)
 
-import Utils.Data.Outcome
+import Skulk.Outcome
+
 import Utils.Data.Tagged
 
 -- | Typesafe wrapper around system's base URL.

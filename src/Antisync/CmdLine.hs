@@ -19,7 +19,8 @@ where
 
 import System.Console.CmdArgs.Explicit
 
-import Utils.Data.Outcome
+import Skulk.Outcome
+
 import Utils.Data.Tagged
 
 import Antisync.Config(SystemName)

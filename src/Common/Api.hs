@@ -15,7 +15,7 @@ import Data.ByteString.Lazy(fromChunks)
 
 import Common.Model
 
-import Utils.Data.Outcome
+import Skulk.Outcome
 
 deriving instance ToJSON Title
 deriving instance ToJSON Metalink

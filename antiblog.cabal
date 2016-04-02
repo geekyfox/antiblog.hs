@@ -20,9 +20,9 @@ executable antiblog
                        -fno-warn-name-shadowing
                        -fno-warn-missing-signatures
   -- other-modules:       
-  build-depends:       base              ==4.6.*
-                      --,anticore          ==0.1.0.1
-                      --,antihost          ==0.1.0.1
+  build-depends:
+    base >=4.5 && <5.0
+    ,skulk >= 0.1 && < 0.2
                       ,aeson             ==0.11.0.0
                       ,blaze-html        >=0.8.0.2    && <0.9
                       ,bytestring        >=0.10.6.0   && <0.11
@@ -51,7 +51,9 @@ executable antiwork
                        -fno-warn-name-shadowing
                        -fno-warn-missing-signatures
   -- other-modules:       
-  build-depends:       base             ==4.6.*
+  build-depends:
+    base >=4.5 && < 5.0
+    ,skulk >= 0.1 && < 0.2
                       ,postgresql-simple ==0.5.1.2
                       ,resource-pool     >=0.2.3.2  && <0.3
                       --,anticore         ==0.1.0.1
@@ -84,8 +86,9 @@ executable antisync
                        -fno-warn-name-shadowing
                        -fno-warn-missing-signatures
   -- other-modules:       
-  build-depends:       base             ==4.6.*
-                      -- ,anticore         ==0.1.0.1
+  build-depends:
+    base >=4.5 && < 5.0
+    ,skulk >= 0.1 && < 0.2
                       ,aeson
                       ,bytestring       >=0.10.6.0 && <0.11
                       ,case-insensitive >=1.2.0.4  && <1.3
