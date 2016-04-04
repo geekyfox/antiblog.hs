@@ -18,36 +18,36 @@ class Identified a where entryId :: a -> Int
 instance Identified Int where entryId = id
 
 -- | Wrapper type for entry title.
-newtype Title = Title String deriving (Show, TaggedString, ToString)
+newtype Title = Title String deriving (Show, ToString, IsString)
 class HasTitle a where title :: a -> Title
 
 -- | Wrapper type for entry body.
-newtype Body = Body String deriving (Show, TaggedString, ToString, IsString)
+newtype Body = Body String deriving (Show, ToString, IsString)
 class HasBody a where body :: a -> Body
 
 -- | Wrapper type for entry summary.
-newtype Summary  = Summary String deriving (Show, TaggedString, ToString, IsString)
+newtype Summary  = Summary String deriving (Show, ToString, IsString)
 class HasSummary a where summary :: a -> Summary
 
 class HasBodyOrSummary a where bodyOrSummary :: a -> Either Body Summary
 
 -- | Wrapper type for entry symlink.
-newtype Symlink  = Symlink String deriving (Show, TaggedString, ToString)
+newtype Symlink  = Symlink String deriving (Show, ToString, IsString)
 class HasSymlink a where symlink :: a -> Maybe Symlink
 
 -- | Wrapper type for entry "meta" symlink.
-newtype Metalink = Metalink String deriving (Show, TaggedString, ToString)
+newtype Metalink = Metalink String deriving (Show, ToString, IsString)
 class HasMetalink a where metalink :: a -> Maybe Metalink
 
 -- | Wrapper type for entry tags.
-newtype Tag = Tag String deriving (Show, TaggedString, ToString)
+newtype Tag = Tag String deriving (Show, ToString, IsString)
 class HasTags a where tags :: a -> [Tag]
 
 -- | Wrapper type for entry hash.
-newtype MD5Sig = MD5Sig String deriving (Show, TaggedString, Eq, ToString)
+newtype MD5Sig = MD5Sig String deriving (Show, Eq, ToString)
 class HasHash a where md5sig :: a -> MD5Sig
 
-newtype Permalink = Permalink String deriving (Show, TaggedString, ToString)
+newtype Permalink = Permalink String deriving (Show, ToString, IsString)
 class HasPermalink a where permalink :: a -> Permalink
 instance HasPermalink Permalink where permalink = id
 

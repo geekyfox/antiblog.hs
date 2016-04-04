@@ -113,7 +113,7 @@ showStatus v = putStrLn . describe fun
 injectId :: Endpoint -> FilePath -> Int -> IO ()
 injectId sys fpath id = load >>= save
     where
-        prefix  = "## antiblog public " ++ expose (systemName sys) ++
+        prefix  = "## antiblog public " ++ toString (systemName sys) ++
                   " " ++ show id ++ "\n"
         access  = withBinaryFile fpath
         load    = access ReadMode hGetContents

@@ -27,6 +27,7 @@ import Data.List(sortBy)
 import Data.Maybe
 import Data.Ord(comparing)
 import Data.Pool(Pool, withResource, createPool)
+import Data.String(fromString)
 import Database.PostgreSQL.Simple hiding (connect)
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.ToField
@@ -142,7 +143,7 @@ slideFeedPosition conn = get >>= mapM_ set
             "UPDATE rss_entry SET feed_position = feed_position + 1 WHERE entry_id = ?" (Only uid)
 
 formatEntryLinkInContext :: Connection -> PageKind -> Int -> IO Permalink
-formatEntryLinkInContext c pk uid = wrap <$> decide <$> get
+formatEntryLinkInContext c pk uid = fromString <$> decide <$> get
     where
         get = query c "SELECT link, kind FROM symlink WHERE entry_id = ?" (Only uid)
         pick :: (Eq a) => a -> [(b,a)] -> Maybe b
@@ -180,10 +181,10 @@ rotateEntriesImpl conn = do
     where
         shift mx = do
             lnk <- shiftImpl True mx
-            return $ "Promoted entry " ++ expose lnk
+            return $ "Promoted entry " ++ toString lnk
         shiftInvisible mx = do
             lnk <- shiftImpl False mx
-            return $ "Promoted invisible entry " ++ expose lnk
+            return $ "Promoted invisible entry " ++ toString lnk
         shiftImpl visible mx = do
             [Only uid] <- query conn "SELECT id FROM entry WHERE rank = ?" (Only mx)            
             slideEntryRanks conn 1
@@ -321,7 +322,7 @@ fetchEntries conn ix mtag = fetchEntryIds conn ix mtag >>= retrieve
             mapM digest rs
         digest (uid, teaser, body, title, dbSymlink, dbMetalink) = do
             let isMeta = isJust dbMetalink
-            let isMicro = (expose teaser) == (expose body)
+            let isMicro = (toString teaser) == (toString body)
             let text = if isMicro then Left body else Right teaser
             tags <- fetchTagsFast conn uid isMicro isMeta
             let content = RenderContent title text tags
@@ -357,7 +358,7 @@ fetchTagsFast c uid hasMicro hasMeta = decorate <$> go
         go = do
             rs <- query c "SELECT tag FROM entry_tag WHERE entry_id = ?" (Only uid)
             return $ map fromOnly rs
-        decorate xs = xs ++ [wrap "micro" | hasMicro] ++ [wrap "meta" | hasMeta]
+        decorate xs = xs ++ ["micro" | hasMicro] ++ ["meta" | hasMeta]
 
 fetchEntryById :: Connection -> PageKind -> Int -> IO (Maybe (Either SingleEntry String))
 fetchEntryById conn pk uid =  do
@@ -372,7 +373,7 @@ fetchEntryById conn pk uid =  do
             return $ Just $ Right a
         ((Nothing, bd, ts, ti, sl, ml):_) -> do
             sls <- fetchSeries conn uid
-            let readMore = (expose bd) /= ts
+            let readMore = (toString bd) /= ts
             let hasMicro = not readMore
             tags <- fetchTagsFast conn uid hasMicro (isJust ml)
             let content = RenderContent ti (Left bd) tags
@@ -392,7 +393,7 @@ fetchRandomEntryImpl :: Connection -> IO Permalink
 fetchRandomEntryImpl c = do
     rs <- query_ c "SELECT id FROM entry WHERE NOT invisible ORDER BY random() LIMIT 1"
     case rs of
-        [] -> return $ wrap "/"
+        [] -> return "/"
         (Only n:_) -> formatEntryLink c n
 
 fetchRssFeedImpl :: Connection -> IO [RssEntry]
@@ -462,14 +463,14 @@ updateEntryImpl conn uid e = do
     recordOptionalData conn e uid
   where
       ts = case nonEmpty $ summary e of
-                      Just s -> s
-                      Nothing -> wrap $ trim $ expose $ body e
+          Just s -> s
+          Nothing -> liftT trim (body e)
       trim s
           | length s < 600 = s
           | otherwise = let
-                      x = reverse $ take 600 s
-                      y = reverse $ skip ' ' x
-                      z = reverse $ skip '\n' x
+                  x = reverse $ take 600 s
+                  y = reverse $ skip ' ' x
+                  z = reverse $ skip '\n' x
                 in if length z > 100 then z else y
       skip _ [] = []
       skip y (x:xs) | x == y = xs | otherwise = skip y xs

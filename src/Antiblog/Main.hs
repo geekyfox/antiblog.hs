@@ -55,7 +55,7 @@ getFeed db cfg = renderFeed cfg <$> fetchRssFeed db
 
 -- | Provides a random link.
 getRandom :: PoolT -> ConfigSRV -> IO T.Text
-getRandom db cfg = T.pack <$> urlConcat (baseUrl cfg) <$> expose <$> fetchRandomEntry db
+getRandom db cfg = T.pack <$> urlConcat (baseUrl cfg) <$> toString <$> fetchRandomEntry db
 
 mparam :: (Parsable a) => T.Text -> ActionM (Maybe a)
 mparam key = fmap Just (param key) `rescue` (\_ -> return Nothing)

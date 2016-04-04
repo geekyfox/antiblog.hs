@@ -43,10 +43,10 @@ import Common.Config
 import Utils.Data.Tagged
 
 -- | Typesafe wrapper around the name of the system.
-newtype SystemName = SystemName String deriving (Show, IsString, ToString, TaggedString, Eq)
+newtype SystemName = SystemName String deriving (Show, IsString, ToString, Eq)
 
 instance FromJSON SystemName where
-    parseJSON = liftM wrap . parseJSON
+    parseJSON x = fromString <$> (parseJSON x)
 
 -- | Information about a single endpoint.
 data Endpoint = EP {
@@ -63,15 +63,13 @@ data Endpoint = EP {
 
 instance FromJSON Endpoint where
     parseJSON (Object v) =
-        EP <$> v .: "name"
-           <*> v .: "url"
-           <*> v .: "apiKey"
+        EP <$> v .: "name" <*> v .: "url"  <*> v .: "apiKey"
     parseJSON _ = mzero
 
 -- | Gets an API endpoint URL (basically, just appends \"/api\" to
 -- 'baseUrl')
 apiUrl :: Endpoint -> String
-apiUrl cfg = expose (remoteUrl cfg) ++ "api/"
+apiUrl = liftT (\s -> s ++ "api/") .  remoteUrl
 
 -- | Whole configuration file.
 data Config = CFG {
@@ -107,7 +105,7 @@ loadNamed n = liftM (>>= seek) readConfig
 select :: SystemName -> [Endpoint] -> Outcome Endpoint
 select n = maybe (fail msg) return . find match
     where
-        msg = "Endpoint not found in config.json: " ++ expose n
+        msg = liftT (\s -> "Endpoint not found in config.json: " ++ s) n
         match e = n == systemName e
 
 -- | Finds the suitable endpoint configuration and aborts the

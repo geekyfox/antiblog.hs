@@ -69,7 +69,7 @@ comprise cfg tags x = AUG
     ,hasRssLink = entityHasRss x
     ,title = liftT (\s -> s ++ suffix (entityTitle x)) generalTitle
     ,ownUrl = entityUrl base x
-    ,summary = unformat $ fromMaybe extendedTitle $ (shapeshift <$> entityText x)
+    ,summary = liftT stripTags $ fromMaybe extendedTitle $ (shapeshift <$> entityText x)
     ,tags = tags
     ,siteTitle = C.siteTitle cfg
     ,hasAuthor = C.hasAuthor cfg
@@ -84,7 +84,7 @@ comprise cfg tags x = AUG
         extendedTitle
             | C.hasAuthor cfg = liftT (\s -> s ++ " by Ivan Appel") generalTitle
             | otherwise = shapeshift generalTitle
-        suffix = maybe "" (\x -> ": " ++ x) . fmap expose
+        suffix = maybe "" (liftT (\x -> ":" ++ x))
 
 instance Entity M.Page where
     entityHasRss _ = True
@@ -92,18 +92,16 @@ instance Entity M.Page where
     entityUrl b = fromString . urlConcat b . M.own
     entityText _ = Nothing
         
-        -- wrap "The Antiblog by Ivan Appel"
-
 instance Entity M.SingleEntry where
     entityHasRss _ = False
-    entityTitle = Just . wrap . displayTitle
+    entityTitle = Just . fromString . displayTitle
     entityUrl = permalink
     entityText = Just . M.bodyOrSummary
 
 instance Entity () where
     entityHasRss _ = False
     entityTitle _ = Nothing
-    entityUrl b _ = expose b
+    entityUrl b _ = toString b
     entityText _ = Nothing
 
 -- | Produces a `HrefFun` that prepends `BaseURL` 
@@ -115,10 +113,6 @@ stripTags :: String -> String
 stripTags []         = []
 stripTags ('<' : xs) = stripTags $ drop 1 $ dropWhile (/= '>') xs
 stripTags (x : xs)   = x : stripTags xs
-
--- | Removes HTML formatting from a `TaggedString`
-unformat :: (TaggedString a) => a -> a
-unformat = wrap . stripTags . expose
 
 -- | Renders OpenGraph section of \<head\>
 opengraph :: Augmented a -> Html
@@ -134,7 +128,7 @@ opengraph w =
 
 -- | Display title of the entry (either title or #\$id)
 displayTitle :: (M.HasTitle a, M.Identified a, IsString b) => a -> b
-displayTitle e = fromString $ fmt $ expose $ M.title e
+displayTitle e = liftT fmt (M.title e)
     where
         fmt "" = '#' : show (M.entryId e)
         fmt st = st
@@ -149,8 +143,8 @@ permalink base entry = fromString $ urlConcat base preferred
         priority  = case M.pageKind entry of
             M.Normal -> [symlink, metalink]
             M.Meta -> [metalink, symlink]
-        symlink   = expose <$> M.symlink entry
-        metalink  = expose <$> M.metalink entry
+        symlink   = toString <$> M.symlink entry
+        metalink  = toString <$> M.metalink entry
 
 -- | Produces /<head/> part of HTML document.
 htmlHead :: Augmented a -> Html
@@ -247,7 +241,7 @@ layoutEntryBarebone w@AUG{baseUrl = base} e =
             H.div ! class_ "footer" $
                 mapM_ taglink ts'
     where
-        ts = map expose $ M.tags e
+        ts = map toString $ M.tags e
         ts' = patchTags w Prelude.id ts
         tagless = null ts'
         modulo = (M.uid e `mod` 6) + 1        
@@ -266,16 +260,16 @@ layoutEntryBarebone w@AUG{baseUrl = base} e =
             case listToMaybe $ M.seriesLinks e of
                  Nothing -> return ()
                  Just (M.SL first prev next last) -> H.div ! class_ "series-links" $ do
-                     a ! mkref w (expose first) $ "First in series"
+                     a ! mkref w (toString first) $ "First in series"
                      " | "
                      sLink "Previous" prev
                      " | "
                      sLink "Next" next
                      " | "
-                     a ! mkref w (expose last) $ "Last in series"
+                     a ! mkref w (toString last) $ "Last in series"
         sLink :: Html -> Maybe M.Permalink -> Html
         sLink txt Nothing = txt
-        sLink txt (Just v) = a ! mkref w (expose v) $ txt
+        sLink txt (Just v) = a ! mkref w (toString v) $ txt
 
 -- | Produces a complete page with single entry.
 layoutEntry :: Augmented M.SingleEntry -> Html
@@ -308,25 +302,26 @@ layoutNotFound w = layoutCommon w inner
 
 -- | Concatenates the urls.
 urlConcat :: BaseURL -> String -> String
-urlConcat base ('/':xs) = expose base ++ xs
-urlConcat base xs       = expose base ++ xs
+urlConcat base ('/':xs) = toString base ++ xs
+urlConcat base xs = toString base ++ xs
 
 -- | Renders the RSS feed.
 renderFeed :: C.ConfigSRV -> [M.RssEntry] -> String
 renderFeed w items = showXML $ rssToXML feed
     where
         base = C.baseUrl w
-        feed = RSS  (expose $ C.siteTitle w)
-                    (fromJust $ parseURI $ expose base)
-                    "/dev/brain >> /dev/null"
-                    []
-                    (Prelude.map convert items)
+        feed = RSS
+                (toString $ C.siteTitle w)
+                (fromJust $ parseURI $ toString base)
+                "/dev/brain >> /dev/null"
+                []
+                (Prelude.map convert items)
         convert i =
-            convertTitle (expose $ M.title i) ++
-            [ Guid False $ expose $ M.md5sig i
+            convertTitle (toString $ M.title i) ++
+            [ Guid False $ toString $ M.md5sig i
             , PubDate $ M.timestamp i
-            , Link $ fromJust $ parseURI $ urlConcat base $ expose $ M.permalink i
-            , Description $ expose $ M.summary i
+            , Link $ fromJust $ parseURI $ urlConcat base $ toString $ M.permalink i
+            , Description $ toString $ M.summary i
             ]
         convertTitle "" = []
         convertTitle ti = [Title ti]

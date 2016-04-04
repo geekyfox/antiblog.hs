@@ -6,34 +6,27 @@ module Utils.Data.Tagged where
 import Data.Maybe(fromMaybe)
 import Data.String(IsString,fromString)
 
-class ToString w where
-    -- | Exposes string content
-    expose :: w -> String
-
-instance (ToString a, ToString b) => ToString (Either a b) where
-    expose = either expose expose
-
-instance ToString String where
-    expose = id
-
 -- | Typeclass for `newtype`s around `String`s used to make operation
 --   with multiple different strings more typesafe.
-class ToString w => TaggedString w where
-    -- | Wraps string content
-    wrap   :: String -> w
-    
+class ToString w where
+    -- | Exposes string content
+    toString :: w -> String
+
+instance (ToString a, ToString b) => ToString (Either a b) where
+    toString = either toString toString
+
+instance ToString String where
+    toString = id
+
+liftT :: (ToString a, IsString b) => (String -> String) -> a -> b
+liftT f = fromString . f . toString
+
 -- | Adapter between custom `TaggedString` and common `IsString`.
 shapeshift :: (ToString a, IsString b) => a -> b
-shapeshift = fromString . expose
+shapeshift = liftT id
 
-liftT :: (ToString a, TaggedString b) => (String -> String) -> a -> b
-liftT f = wrap . f . expose
+nonEmpty :: (IsString a, ToString a) => a -> Maybe a
+nonEmpty x = case toString x of { "" -> Nothing ; _ -> Just x }
 
-nonEmpty :: (TaggedString a) => a -> Maybe a
-nonEmpty x = case expose x of { "" -> Nothing ; txt -> Just $ wrap txt }
-
-empty :: (TaggedString a) => Maybe a -> a
-empty = fromMaybe (wrap "")
-
-instance TaggedString String where
-    wrap = id
+empty :: (IsString a) => Maybe a -> a
+empty = fromMaybe (fromString "")

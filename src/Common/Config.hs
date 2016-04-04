@@ -22,6 +22,7 @@ module Common.Config where
 import Control.Applicative
 import Control.Monad(mzero,liftM)
 import Data.Aeson
+import Data.String(IsString,fromString)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.Text as T
 
@@ -35,13 +36,13 @@ import Utils.Data.Tagged
 -- | Typesafe wrapper around system's base URL.
 newtype BaseURL = BaseURL String deriving ToString
 
-instance TaggedString BaseURL where
-    wrap x
+instance IsString BaseURL where
+    fromString x
         | last x == '/' = BaseURL x
         | otherwise = BaseURL $ x ++ "/"
 
 instance FromJSON BaseURL where
-    parseJSON = liftM wrap . parseJSON
+    parseJSON x = fromString <$> (parseJSON x)
 
 -- | Loads settings from a file
 load :: (FromJSON a) => FilePath -> IO (Outcome a)
@@ -56,10 +57,10 @@ loadHome suffix = do
     prefix <- getHomeDirectory
     load $ combine prefix suffix
 
-newtype SiteTitle = SiteTitle String deriving (ToString, TaggedString)
+newtype SiteTitle = SiteTitle String deriving (ToString, IsString)
 
 instance FromJSON SiteTitle where
-    parseJSON = liftM wrap . parseJSON
+    parseJSON x = fromString <$> (parseJSON x)
 
 -- | Runtime configuration for the server.
 data ConfigSRV = SRV {

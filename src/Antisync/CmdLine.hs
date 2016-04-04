@@ -17,12 +17,10 @@ module Antisync.CmdLine
 
 where
 
+import Data.String(fromString)
 import System.Console.CmdArgs.Explicit
-
 import Skulk.Outcome
-
 import Utils.Data.Tagged
-
 import Antisync.Config(SystemName)
 
 -- | Verbosity level.
@@ -62,7 +60,7 @@ targetFlag = flagReq ["target"]
                      "<name of remote endpoint>"
                      "Use production server"
     where
-        mutate value a = Right $ a { actionEndpoint = Just $ wrap value }
+        mutate value a = Right $ a { actionEndpoint = Just $ fromString value }
     
 verboseFlag :: Flag Action
 verboseFlag = flagNone

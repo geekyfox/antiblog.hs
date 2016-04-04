@@ -1,3 +1,6 @@
+
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | This is an implementation of parser for (largely ad hoc and
 --   rudimentary) Antiblog's markup language.
 --
@@ -101,6 +104,7 @@ import Control.Monad(foldM)
 import Data.Hash.MD5
 import Data.List(intercalate)
 import Data.Maybe(isJust,fromJust)
+import Data.String(fromString)
 import Data.String.Utils(strip)
 
 import Skulk.Outcome
@@ -171,8 +175,8 @@ mk sys = P {
     state = Body
     ,system = sys
     ,publish = False
-    ,title = wrap ""
-    ,summary = wrap ""
+    ,title = ""
+    ,summary = ""
     ,uid = Nothing
     ,body = []
     ,footnotes = []
@@ -209,16 +213,16 @@ fullbody p = M.Body fullText
 signature :: Parser -> M.MD5Sig
 signature e | isJust (redirect e) = M.MD5Sig $ md5s $ Str $ concatMap (\f -> f e)
         [fromJust . redirect
-        ,maybe "" expose . symlink
-        ,maybe "" expose . metalink
+        ,toString . empty . symlink
+        ,toString . empty . metalink
         ]
 signature e = M.MD5Sig $ md5s $ Str $ concatMap (\f -> f e)
-        [expose . title
-        ,expose . summary
-        ,expose . fullbody
-        ,maybe "" expose . symlink
-        ,maybe "" expose . metalink
-        ,intercalate ";" . map expose . tags
+        [toString . title
+        ,toString . summary
+        ,toString . fullbody
+        ,toString . empty . symlink
+        ,toString . empty . metalink
+        ,intercalate ";" . map toString . tags
         ,concatMap show . series
         ]
 
@@ -231,8 +235,8 @@ buildFS p
         Just n -> OK $ M.Redirect $ M.Entry (M.StoredId n (signature p)) content extra
             where
                 extra = M.RedirectExtra (symlink p) (metalink p)
-                content = wrap $ fromJust $ redirect p
-    | null $ expose $ fullbody p = Fail "Body is missing"
+                content = fromString $ fromJust $ redirect p
+    | null $ toString $ fullbody p = Fail "Body is missing"
     | otherwise = OK $ case uid p of
             Nothing -> M.New (M.Entry (M.NewId (signature p)) content extra)
             Just n -> M.Stored (M.Entry (M.StoredId n (signature p)) content extra)
@@ -273,7 +277,7 @@ insertSummary p | state p /= Body = Fail
 insertSummary p =
     case nonEmpty $ summary p of
          Nothing -> Fail "insert-summary directive without summary"
-         Just s  -> OK $ append p $ expose s
+         Just s  -> OK $ append p $ toString s
 
 -- | Starts accumulating new footnote.
 startFootnote :: Parser -> Outcome Parser
@@ -329,20 +333,20 @@ parseLine p line =
             Skip "Draft"
         impl ["publish"] =
             OK p { publish = True }
-        impl ["public", env, _] | env /= expose (system p) =
+        impl ["public", env, _] | env /= toString (system p) =
             OK p
         impl ["public", _, index] =
             case readInt index of
                  Just num -> OK $ p { uid = Just num }
                  _        -> Fail $ "Bad ID: " ++ index
         impl ["symlink", link] =
-            OK p { symlink = Just $ wrap link }
+            OK p { symlink = Just $ fromString link }
         impl ["meta", link] =
-            OK p { metalink = Just $ wrap link }
+            OK p { metalink = Just $ fromString link }
         impl ("title":title) =
-            OK p { title = wrap $ unwords title }
+            OK p { title = fromString $ unwords title }
         impl ("tags":tags) =
-            OK p { tags = map wrap tags }
+            OK p { tags = map fromString tags }
         impl ["summary"] =
             OK p { state = Summary }
         impl ["content"] =
@@ -359,9 +363,9 @@ parseLine p line =
              case readInt index of
                   Just num -> addSeries p name num
                   _ -> Fail $ "Bad series index: " ++ index
-        impl ["redirect", env, _] | env /= expose (system p) =
+        impl ["redirect", env, _] | env /= toString (system p) =
             OK p
-        impl ["redirect", env, href] =
+        impl ["redirect", _, href] =
             OK p { redirect = Just href }
         impl _ = Fail $ "Unknown directive: " ++ line
     in case words line of
