@@ -15,9 +15,9 @@ import System.Directory
     , doesFileExist
     , getDirectoryContents
     )
-import System.IO(IOMode(ReadMode,WriteMode), withBinaryFile)
+import System.IO(IOMode(ReadMode,WriteMode), withBinaryFile, hPutStr)
 import System.IO.Strict(hGetContents)
-import System.IO.UTF8(hPutStr)
+-- import System.IO.UTF8(hPutStr)
 import System.Posix (fileSize, getFileStatus)
 import Skulk.Deep
 import Skulk.Outcome

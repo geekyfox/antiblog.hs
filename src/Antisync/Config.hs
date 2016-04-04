@@ -1,5 +1,6 @@
 
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 {- |
     Runtime configuration.
@@ -42,17 +43,7 @@ import Common.Config
 import Utils.Data.Tagged
 
 -- | Typesafe wrapper around the name of the system.
-newtype SystemName = SystemName String deriving Show
-
-instance TaggedString SystemName where
-    expose (SystemName s) = s
-    wrap = SystemName
-
-instance Eq SystemName where
-    x == y = expose x == expose y
-    
-instance IsString SystemName where
-    fromString = wrap
+newtype SystemName = SystemName String deriving (Show, IsString, ToString, TaggedString, Eq)
 
 instance FromJSON SystemName where
     parseJSON = liftM wrap . parseJSON

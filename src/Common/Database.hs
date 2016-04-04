@@ -309,22 +309,24 @@ fetchEntryIdsImpl c n Nothing = query c
     \ORDER BY rank LIMIT 5 OFFSET ?" (Only $ n * 5 - 5)
  
 fetchEntries :: Connection -> Index -> Maybe String -> IO [PagedEntry]
-fetchEntries c ix mtag = fetchEntryIds c ix mtag >>= retrieve
+fetchEntries conn ix mtag = fetchEntryIds conn ix mtag >>= retrieve
     where
         retrieve [] = return []
         retrieve ids = do
-            rs <- query c
-                "SELECT id, teaser, title \
+            rs <- query conn
+                "SELECT id, teaser, body, title \
                 \,(SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'normal') \
                 \,(SELECT link FROM symlink WHERE entry_id = e.id AND kind = 'meta') \
-                \, (body = teaser) \
                 \FROM entry e WHERE id IN ? ORDER BY rank" (Only $ In $ map fromOnly ids)
             mapM digest rs
-        digest (uid,sm,ti,sl,ml,micro) = do
-            tags <- fetchTagsFast c uid micro (isJust ml)
-            let content = StoredContent ti (Body sm) (Summary sm) tags
-            let symlink  = (\x -> Symlink $ "entry/" ++ x) <$> sl
-            let metalink = (\x -> Metalink $ "meta/" ++ x) <$> ml
+        digest (uid, teaser, body, title, dbSymlink, dbMetalink) = do
+            let isMeta = isJust dbMetalink
+            let isMicro = (expose teaser) == (expose body)
+            let text = if isMicro then Left body else Right teaser
+            tags <- fetchTagsFast conn uid isMicro isMeta
+            let content = RenderContent title text tags
+            let symlink  = (\x -> Symlink $ "entry/" ++ x) <$> dbSymlink
+            let metalink = (\x -> Metalink $ "meta/" ++ x) <$> dbMetalink
             let pageKind = if mtag == Just "meta" then Meta else Normal
             let extra = PagedExtra symlink metalink pageKind
             return $ Entry uid content extra
@@ -370,11 +372,12 @@ fetchEntryById conn pk uid =  do
             return $ Just $ Right a
         ((Nothing, bd, ts, ti, sl, ml):_) -> do
             sls <- fetchSeries conn uid
-            let rm = (expose bd) /= (expose ts)
-            tags <- fetchTagsFast conn uid rm (isJust ml)
-            let content = StoredContent ti bd ts tags
-            let symlink = liftT (\x -> "entry/" ++ x) <$> sl
-            let metalink = liftT (\x -> "meta/" ++ x) <$> ml
+            let readMore = (expose bd) /= ts
+            let hasMicro = not readMore
+            tags <- fetchTagsFast conn uid hasMicro (isJust ml)
+            let content = RenderContent ti (Left bd) tags
+            let symlink = liftT (\x -> "entry/" ++ x) <$> (sl :: Maybe String)
+            let metalink = liftT (\x -> "meta/" ++ x) <$> (ml :: Maybe String)
             let extra = SingleExtra symlink metalink pk sls
             return $ Just $ Left $ Entry uid content extra
 

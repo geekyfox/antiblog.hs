@@ -57,38 +57,40 @@ data Augmented a = AUG {
 }
 
 class Entity a where
-    entityHasRss  :: a -> Bool
-    entityTitle   :: a -> Maybe M.Title
-    entityUrl     :: BaseURL -> a -> String
-    entitySummary :: a -> Maybe M.Summary
+    entityHasRss :: a -> Bool
+    entityTitle :: a -> Maybe M.Title
+    entityUrl :: BaseURL -> a -> String
+    entityText :: a -> Maybe (Either M.Body M.Summary)
 
 comprise :: (Entity a) => C.ConfigSRV -> [M.TagUsage] -> a -> Augmented a
 comprise cfg tags x = AUG
     {value      = x
     ,baseUrl    = base
     ,hasRssLink = entityHasRss x
-    ,title      = wrap $ generalTitle ++ suffix (entityTitle x)
-    ,ownUrl     = entityUrl base x
-    ,summary    = unformat $ fromMaybe extendedTitle $ entitySummary x
-    ,tags       = tags
-    ,siteTitle  = C.siteTitle cfg
-    ,hasAuthor  = C.hasAuthor cfg
+    ,title = liftT (\s -> s ++ suffix (entityTitle x)) generalTitle
+    ,ownUrl = entityUrl base x
+    ,summary = unformat $ fromMaybe extendedTitle $ (shapeshift <$> entityText x)
+    ,tags = tags
+    ,siteTitle = C.siteTitle cfg
+    ,hasAuthor = C.hasAuthor cfg
     ,hasPoweredBy = C.hasPoweredBy cfg
     ,hasMicroTag = C.hasMicroTag cfg
     }
     where
         base = C.baseUrl cfg
-        generalTitle = expose $ C.siteTitle cfg
+        generalTitle :: C.SiteTitle
+        generalTitle = C.siteTitle cfg
+        extendedTitle :: M.Summary
         extendedTitle
-            | C.hasAuthor cfg = wrap $ generalTitle ++ " by Ivan Appel"
-            | otherwise = wrap generalTitle
+            | C.hasAuthor cfg = liftT (\s -> s ++ " by Ivan Appel") generalTitle
+            | otherwise = shapeshift generalTitle
         suffix = maybe "" (\x -> ": " ++ x) . fmap expose
 
 instance Entity M.Page where
     entityHasRss _ = True
     entityTitle _   = Nothing
     entityUrl b = fromString . urlConcat b . M.own
-    entitySummary _ = Nothing
+    entityText _ = Nothing
         
         -- wrap "The Antiblog by Ivan Appel"
 
@@ -96,13 +98,13 @@ instance Entity M.SingleEntry where
     entityHasRss _ = False
     entityTitle = Just . wrap . displayTitle
     entityUrl = permalink
-    entitySummary = Just . M.summary
+    entityText = Just . M.bodyOrSummary
 
 instance Entity () where
     entityHasRss _ = False
     entityTitle _ = Nothing
     entityUrl b _ = expose b
-    entitySummary _ = Nothing
+    entityText _ = Nothing
 
 -- | Produces a `HrefFun` that prepends `BaseURL` 
 mkref :: Augmented a -> String -> Attribute
@@ -231,14 +233,15 @@ layoutCommon w content =
                 content
 
 -- | Produces a barebone block of HTML with an entry.
--- layoutEntryBarebone :: (M.RenderEntry b) => Augmented a -> b -> Html
+layoutEntryBarebone :: (M.HasSeriesLinks c, M.HasSymlink c, M.HasMetalink c, M.HasPageKind c)
+    => Augmented a -> M.Entry Int M.RenderContent c -> Html
 layoutEntryBarebone w@AUG{baseUrl = base} e =
     H.div ! class_ entryClass $ do
         H.div ! class_ "header colored" $ self (displayTitle e)
         H.div ! class_ bodyClass $
             H.div ! class_ "stuff" $ do
                 seriesLinksBlock
-                preEscapedText (shapeshift $ M.body e)
+                preEscapedText (shapeshift $ M.bodyOrSummary e)
                 when (M.readMore e) readMoreBlock    
         unless tagless $
             H.div ! class_ "footer" $
@@ -251,7 +254,7 @@ layoutEntryBarebone w@AUG{baseUrl = base} e =
         entryClass = fromString $ "entry color_" ++ show modulo
         bodyClass = if tagless then "body tagless" else "body"
         self t = a ! href (permalink base e) $ t
-        readMoreBlock    = do
+        readMoreBlock = do
                         br
                         "[" ; self "read more" ; "]"
         taglink t   = do

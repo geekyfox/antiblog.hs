@@ -18,10 +18,14 @@ readOnly Verify = True
 readOnly VerifyStrict = True
 readOnly Retrofit = False
 
-data DependencyKind = Requires deriving Show
+data DependencyKind =
+    Requires 
+    | Breaks
+    deriving Show
 
 toString :: DependencyKind -> String
 toString Requires = "requires"
+toString Breaks = "breaks"
 
 type Dependency = (DependencyKind, Change)
 
@@ -40,6 +44,9 @@ hasDDL ddl change = change { ddl = ddl }
 
 requires :: Change -> Change -> Change
 requires other = addDependency (Requires, other)
+
+breaks :: Change -> Change -> Change
+breaks other = addDependency (Breaks, other)
 
 addDependency :: Dependency -> Change -> Change
 addDependency dep change = change { dependencies = dep:dependencies change }

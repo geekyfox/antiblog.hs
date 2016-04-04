@@ -1,10 +1,15 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE CPP #-}
 
 -- | Data model.
 
 module Common.Model where
 
 import Data.Char(isDigit)
+#if __GLASGOW_HASKELL__ >= 708
+import Data.Either(isRight)
+#endif
+import Data.String(IsString)
 import Data.Time.Clock
 
 import Utils.Data.Tagged
@@ -13,34 +18,36 @@ class Identified a where entryId :: a -> Int
 instance Identified Int where entryId = id
 
 -- | Wrapper type for entry title.
-newtype Title = Title String deriving (Show, TaggedString)
+newtype Title = Title String deriving (Show, TaggedString, ToString)
 class HasTitle a where title :: a -> Title
 
 -- | Wrapper type for entry body.
-newtype Body = Body String deriving (Show, TaggedString)
+newtype Body = Body String deriving (Show, TaggedString, ToString, IsString)
 class HasBody a where body :: a -> Body
 
 -- | Wrapper type for entry summary.
-newtype Summary  = Summary String deriving (Show, TaggedString)
+newtype Summary  = Summary String deriving (Show, TaggedString, ToString, IsString)
 class HasSummary a where summary :: a -> Summary
 
+class HasBodyOrSummary a where bodyOrSummary :: a -> Either Body Summary
+
 -- | Wrapper type for entry symlink.
-newtype Symlink  = Symlink String deriving (Show, TaggedString)
+newtype Symlink  = Symlink String deriving (Show, TaggedString, ToString)
 class HasSymlink a where symlink :: a -> Maybe Symlink
 
 -- | Wrapper type for entry "meta" symlink.
-newtype Metalink = Metalink String deriving (Show, TaggedString)
+newtype Metalink = Metalink String deriving (Show, TaggedString, ToString)
 class HasMetalink a where metalink :: a -> Maybe Metalink
 
 -- | Wrapper type for entry tags.
-newtype Tag = Tag String deriving (Show, TaggedString)
+newtype Tag = Tag String deriving (Show, TaggedString, ToString)
 class HasTags a where tags :: a -> [Tag]
 
 -- | Wrapper type for entry hash.
-newtype MD5Sig = MD5Sig String deriving (Show, TaggedString, Eq)
+newtype MD5Sig = MD5Sig String deriving (Show, TaggedString, Eq, ToString)
 class HasHash a where md5sig :: a -> MD5Sig
 
-newtype Permalink = Permalink String deriving (Show, TaggedString)
+newtype Permalink = Permalink String deriving (Show, TaggedString, ToString)
 class HasPermalink a where permalink :: a -> Permalink
 instance HasPermalink Permalink where permalink = id
 
@@ -59,6 +66,8 @@ instance (Identified a) => Identified (Entry a b c) where entryId = entryId . ui
 instance (HasTitle b) => HasTitle (Entry a b c) where title = title . content
 instance (HasSummary b) => HasSummary (Entry a b c) where summary = summary . content
 instance (HasBody b) => HasBody (Entry a b c) where body = body . content
+instance (HasBodyOrSummary b) => HasBodyOrSummary (Entry a b c) where
+    bodyOrSummary = bodyOrSummary . content
 instance (HasPermalink b) => HasPermalink (Entry a b c) where permalink = permalink . content
 instance (HasTags b) => HasTags (Entry a b c) where tags = tags . content
 instance (HasSeriesRef c) => HasSeriesRef (Entry a b c) where seriesRef = seriesRef . extra
@@ -93,6 +102,12 @@ instance HasPermalink RssContent where permalink (RssContent  _ _ c) = c
 
 type NewEntry = Entry NewId StoredContent StoredExtra
 type StoredEntry = Entry StoredId StoredContent StoredExtra
+
+data RenderContent = RenderContent Title (Either Body Summary) [Tag]
+instance HasTitle RenderContent where title (RenderContent a _ _) = a
+instance HasBodyOrSummary RenderContent where bodyOrSummary (RenderContent _ b _) = b
+instance HasTags RenderContent where tags (RenderContent _ _ c) = c
+
 -- | Representation of entry in RSS feed.
 type RssEntry = Entry StoredId RssContent UTCTime
 
@@ -119,12 +134,17 @@ parseRef s = case parseIndex s of
                   Just ix -> (ix, Nothing)
                   Nothing -> (Number 1, Just s)
 
-
 class HasSeriesLinks a where
     seriesLinks :: a -> [SeriesLinks]
 
-readMore :: (HasBody a, HasSummary a) => a -> Bool
-readMore x = (expose $ body x) == (expose $ summary x)
+#if __GLASGOW_HASKELL__ < 708
+isRight :: Either a b -> Bool
+isRight (Left _) = False
+isRight (Right _) = True
+#endif
+
+readMore :: (HasBodyOrSummary a) => a -> Bool
+readMore = isRight . bodyOrSummary
 
 data PagedExtra = PagedExtra (Maybe Symlink) (Maybe Metalink) PageKind
 
@@ -135,7 +155,7 @@ instance HasPageKind PagedExtra where pageKind (PagedExtra _ _ c) = c
 instance HasSeriesLinks PagedExtra where
     seriesLinks _ = []
 
-type PagedEntry = Entry Int StoredContent PagedExtra
+type PagedEntry = Entry Int RenderContent PagedExtra
 
 data SingleExtra = SingleExtra (Maybe Symlink) (Maybe Metalink) PageKind [SeriesLinks]
 instance HasSymlink SingleExtra where symlink (SingleExtra a _ _ _) = a
@@ -143,7 +163,7 @@ instance HasMetalink SingleExtra where metalink (SingleExtra _ b _ _) = b
 instance HasPageKind SingleExtra where pageKind (SingleExtra _ _ c _) = c
 instance HasSeriesLinks SingleExtra where seriesLinks (SingleExtra _ _ _ d) = d
 
-type SingleEntry = Entry Int StoredContent SingleExtra
+type SingleEntry = Entry Int RenderContent SingleExtra
 
 data Page = Page {
       entries  :: [PagedEntry]

@@ -1,5 +1,6 @@
 
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 {- |
     Runtime configuration.
@@ -32,13 +33,12 @@ import Skulk.Outcome
 import Utils.Data.Tagged
 
 -- | Typesafe wrapper around system's base URL.
-newtype BaseURL = BaseURL String
+newtype BaseURL = BaseURL String deriving ToString
 
 instance TaggedString BaseURL where
-    expose (BaseURL s) = s
     wrap x
         | last x == '/' = BaseURL x
-        | otherwise     = BaseURL $ x ++ "/"
+        | otherwise = BaseURL $ x ++ "/"
 
 instance FromJSON BaseURL where
     parseJSON = liftM wrap . parseJSON
@@ -56,11 +56,7 @@ loadHome suffix = do
     prefix <- getHomeDirectory
     load $ combine prefix suffix
 
-newtype SiteTitle = SiteTitle String
-
-instance TaggedString SiteTitle where
-    expose (SiteTitle s) = s
-    wrap = SiteTitle
+newtype SiteTitle = SiteTitle String deriving (ToString, TaggedString)
 
 instance FromJSON SiteTitle where
     parseJSON = liftM wrap . parseJSON

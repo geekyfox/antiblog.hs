@@ -75,4 +75,19 @@ redirectColumn = change "redirect_column" [
     ,requires entry
     ]
 
-schema = [entry, rssEntry, symlink, entryTag, seriesAssignment, redirectColumn]
+dropReadMoreColumn :: Change
+dropReadMoreColumn = change "drop_read_more_column" [
+    hasDDL
+        "ALTER TABLE entry DROP COLUMN read_more"
+    ,breaks entry
+    ]
+
+schema = [
+    entry
+    ,rssEntry
+    ,symlink
+    ,entryTag
+    ,seriesAssignment
+    ,redirectColumn
+    ,dropReadMoreColumn
+    ]
