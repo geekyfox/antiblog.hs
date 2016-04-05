@@ -64,12 +64,12 @@ class Entity a where
 
 comprise :: (Entity a) => C.ConfigSRV -> [M.TagUsage] -> a -> Augmented a
 comprise cfg tags x = AUG
-    {value      = x
-    ,baseUrl    = base
+    {value = x
+    ,baseUrl = base
     ,hasRssLink = entityHasRss x
     ,title = liftT (\s -> s ++ suffix (entityTitle x)) generalTitle
     ,ownUrl = entityUrl base x
-    ,summary = liftT stripTags $ fromMaybe extendedTitle $ (shapeshift <$> entityText x)
+    ,summary = liftT stripTags $ fromMaybe extendedTitle $ shapeshift <$> entityText x
     ,tags = tags
     ,siteTitle = C.siteTitle cfg
     ,hasAuthor = C.hasAuthor cfg
@@ -82,7 +82,7 @@ comprise cfg tags x = AUG
         generalTitle = C.siteTitle cfg
         extendedTitle :: M.Summary
         extendedTitle
-            | C.hasAuthor cfg = liftT (\s -> s ++ " by Ivan Appel") generalTitle
+            | C.hasAuthor cfg = liftT (++ " by Ivan Appel") generalTitle
             | otherwise = shapeshift generalTitle
         suffix = maybe "" (liftT (\x -> ":" ++ x))
 

@@ -42,14 +42,14 @@ instance IsString BaseURL where
         | otherwise = BaseURL $ x ++ "/"
 
 instance FromJSON BaseURL where
-    parseJSON x = fromString <$> (parseJSON x)
+    parseJSON x = fromString <$> parseJSON x
 
 -- | Loads settings from a file
 load :: (FromJSON a) => FilePath -> IO (Outcome a)
-load fname = eitherToProc <$> eitherDecode <$> L.readFile fname
-    where eitherToProc (Left errmsg) = fail $
-            "Error parsing '" ++ fname ++ "': " ++ errmsg
-          eitherToProc (Right v) = return v
+load fname = (eitherToProc . eitherDecode) <$> L.readFile fname
+    where
+        eitherToProc (Left errmsg) = fail $ "Error parsing '" ++ fname ++ "': " ++ errmsg
+        eitherToProc (Right v) = return v
 
 -- | Loads settings from ~\/\</filename/\>
 loadHome :: (FromJSON a) => FilePath -> IO (Outcome a)
@@ -60,7 +60,7 @@ loadHome suffix = do
 newtype SiteTitle = SiteTitle String deriving (ToString, IsString)
 
 instance FromJSON SiteTitle where
-    parseJSON x = fromString <$> (parseJSON x)
+    parseJSON x = fromString <$> parseJSON x
 
 -- | Runtime configuration for the server.
 data ConfigSRV = SRV {

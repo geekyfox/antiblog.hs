@@ -35,7 +35,7 @@ import Antisync.Parser(parseText)
 loadFile :: SystemName -> FilePath -> IO (Outcome File)
 loadFile sys fpath =  
     let
-        drain handle = parseText sys <$> lines <$> hGetContents handle
+        drain handle = (parseText sys . lines) <$> hGetContents handle
         openAndDrain = withBinaryFile fpath ReadMode drain
         retreat = return $ Fail "File too big"
     in do

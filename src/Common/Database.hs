@@ -143,7 +143,7 @@ slideFeedPosition conn = get >>= mapM_ set
             "UPDATE rss_entry SET feed_position = feed_position + 1 WHERE entry_id = ?" (Only uid)
 
 formatEntryLinkInContext :: Connection -> PageKind -> Int -> IO Permalink
-formatEntryLinkInContext c pk uid = fromString <$> decide <$> get
+formatEntryLinkInContext c pk uid = (fromString . decide) <$> get
     where
         get = query c "SELECT link, kind FROM symlink WHERE entry_id = ?" (Only uid)
         pick :: (Eq a) => a -> [(b,a)] -> Maybe b
@@ -322,7 +322,7 @@ fetchEntries conn ix mtag = fetchEntryIds conn ix mtag >>= retrieve
             mapM digest rs
         digest (uid, teaser, body, title, dbSymlink, dbMetalink) = do
             let isMeta = isJust dbMetalink
-            let isMicro = (toString teaser) == (toString body)
+            let isMicro = toString teaser == toString body
             let text = if isMicro then Left body else Right teaser
             tags <- fetchTagsFast conn uid isMicro isMeta
             let content = RenderContent title text tags
@@ -373,7 +373,7 @@ fetchEntryById conn pk uid =  do
             return $ Just $ Right a
         ((Nothing, bd, ts, ti, sl, ml):_) -> do
             sls <- fetchSeries conn uid
-            let readMore = (toString bd) /= ts
+            let readMore = toString bd /= ts
             let hasMicro = not readMore
             tags <- fetchTagsFast conn uid hasMicro (isJust ml)
             let content = RenderContent ti (Left bd) tags
@@ -459,12 +459,11 @@ updateEntryImpl conn uid e = do
         "UPDATE entry SET title = ?, teaser = ?, body = ? \
         \,invisible = FALSE, md5_signature = ?, redirect_url = NULL \
         \WHERE id = ?"
-        (title e, ts, body e, md5sig e, uid)
+        (title e, teaser, body e, md5sig e, uid)
     recordOptionalData conn e uid
   where
-      ts = case nonEmpty $ summary e of
-          Just s -> s
-          Nothing -> liftT trim (body e)
+      teaser = fromMaybe shortBody $ emptyToNothing (summary e)
+      shortBody = liftT trim (body e)
       trim s
           | length s < 600 = s
           | otherwise = let

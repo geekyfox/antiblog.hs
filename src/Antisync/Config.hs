@@ -46,7 +46,7 @@ import Utils.Data.Tagged
 newtype SystemName = SystemName String deriving (Show, IsString, ToString, Eq)
 
 instance FromJSON SystemName where
-    parseJSON x = fromString <$> (parseJSON x)
+    parseJSON x = fromString <$> parseJSON x
 
 -- | Information about a single endpoint.
 data Endpoint = EP {
@@ -69,7 +69,7 @@ instance FromJSON Endpoint where
 -- | Gets an API endpoint URL (basically, just appends \"/api\" to
 -- 'baseUrl')
 apiUrl :: Endpoint -> String
-apiUrl = liftT (\s -> s ++ "api/") .  remoteUrl
+apiUrl = liftT (++ "api/") .  remoteUrl
 
 -- | Whole configuration file.
 data Config = CFG {

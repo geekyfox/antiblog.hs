@@ -102,8 +102,8 @@ encodeEntryImpl e = [
     ,"tags" .= tags e
     ,"series" .= seriesRef e
     ] ++ catMaybes [
-        (\v -> "title" .= v) <$> nonEmpty (title e)
-        ,(\v -> "summary" .= v) <$> nonEmpty (summary e)
+        (\v -> "title" .= v) <$> emptyToNothing (title e)
+        ,(\v -> "summary" .= v) <$> emptyToNothing (summary e)
         ,(\v -> "symlink" .= v) <$> symlink e
         ,(\v -> "metalink" .= v) <$> metalink e
         ]

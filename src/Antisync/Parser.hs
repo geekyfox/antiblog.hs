@@ -211,17 +211,18 @@ fullbody p = M.Body fullText
 
 -- | Calculates MD5 signature of the parsed entry.
 signature :: Parser -> M.MD5Sig
-signature e | isJust (redirect e) = M.MD5Sig $ md5s $ Str $ concatMap (\f -> f e)
-        [fromJust . redirect
-        ,toString . empty . symlink
-        ,toString . empty . metalink
+signature e = M.MD5Sig $ md5s $ Str $ concatMap (\f -> f e) $ case redirect e of
+    Just r ->
+        [const r
+        ,toString . symlink
+        ,toString . metalink
         ]
-signature e = M.MD5Sig $ md5s $ Str $ concatMap (\f -> f e)
+    Nothing ->
         [toString . title
         ,toString . summary
         ,toString . fullbody
-        ,toString . empty . symlink
-        ,toString . empty . metalink
+        ,toString . symlink
+        ,toString . metalink
         ,intercalate ";" . map toString . tags
         ,concatMap show . series
         ]
@@ -275,7 +276,7 @@ insertSummary :: Parser -> Outcome Parser
 insertSummary p | state p /= Body = Fail
     "insert-summary is allowed inside content block"
 insertSummary p =
-    case nonEmpty $ summary p of
+    case emptyToNothing (summary p) of
          Nothing -> Fail "insert-summary directive without summary"
          Just s  -> OK $ append p $ toString s
 

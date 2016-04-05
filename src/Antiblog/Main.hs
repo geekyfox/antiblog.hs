@@ -55,7 +55,7 @@ getFeed db cfg = renderFeed cfg <$> fetchRssFeed db
 
 -- | Provides a random link.
 getRandom :: PoolT -> ConfigSRV -> IO T.Text
-getRandom db cfg = T.pack <$> urlConcat (baseUrl cfg) <$> toString <$> fetchRandomEntry db
+getRandom db cfg = (T.pack . urlConcat (baseUrl cfg) . toString) <$> fetchRandomEntry db
 
 mparam :: (Parsable a) => T.Text -> ActionM (Maybe a)
 mparam key = fmap Just (param key) `rescue` (\_ -> return Nothing)
@@ -95,14 +95,13 @@ decodeEntry uidfun = parsePayload go
         go (Object v) = do
             uid <- uidfun v
             body <- v .: "body"
---            md5sig <- v .: "signature"
-            title <- v .:? "title"
+            title <- nothingToEmpty <$> (v .:? "title")
             symlink <- v .:? "symlink"
             metalink <- v .:? "metalink"
-            summary <- v .:? "summary"
+            summary <- nothingToEmpty <$> (v .:? "summary")
             tags <- v .: "tags"
             series <- v .: "series"
-            let content = StoredContent (empty title) body (empty summary) tags
+            let content = StoredContent title body summary tags
             let extra = StoredExtra series symlink metalink 
             return $ Entry uid content extra
 

@@ -3,7 +3,7 @@
 
 module Utils.Data.Tagged where
 
-import Data.Maybe(fromMaybe)
+import Data.Maybe(fromMaybe,maybe)
 import Data.String(IsString,fromString)
 
 -- | Typeclass for `newtype`s around `String`s used to make operation
@@ -17,6 +17,9 @@ instance (ToString a, ToString b) => ToString (Either a b) where
 
 instance ToString String where
     toString = id
+    
+instance ToString a => ToString (Maybe a) where
+    toString = maybe "" toString
 
 liftT :: (ToString a, IsString b) => (String -> String) -> a -> b
 liftT f = fromString . f . toString
@@ -25,8 +28,8 @@ liftT f = fromString . f . toString
 shapeshift :: (ToString a, IsString b) => a -> b
 shapeshift = liftT id
 
-nonEmpty :: (IsString a, ToString a) => a -> Maybe a
-nonEmpty x = case toString x of { "" -> Nothing ; _ -> Just x }
+emptyToNothing :: ToString a => a -> Maybe a
+emptyToNothing x | null (toString x) = Nothing | otherwise = Just x
 
-empty :: (IsString a) => Maybe a -> a
-empty = fromMaybe (fromString "")
+nothingToEmpty :: IsString a => Maybe a -> a
+nothingToEmpty = fromMaybe (fromString "")
