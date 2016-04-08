@@ -10,7 +10,9 @@ import Control.Monad.IO.Class(liftIO)
 import Data.Aeson hiding (json,Number)
 import Data.Aeson.Types hiding (Number)
 import qualified Data.ByteString.Lazy.Char8 as C
+import Data.List(isSuffixOf)
 import qualified Data.Text.Lazy as T
+import Data.String(IsString)
 import Network.HTTP.Types.Status(forbidden403, notFound404)
 import System.Environment(getArgs)
 import System.IO
@@ -23,6 +25,8 @@ import Common.Model
 import Utils.Data.Tagged
 
 import Antiblog.Layout hiding (baseUrl,tags,title,summary)
+
+import Paths_antiblog
 
 getNotFound :: PoolT -> ConfigSRV -> IO T.Text
 getNotFound db cfg = renderNotFound <$> augm
@@ -111,6 +115,11 @@ decodeEntryPromote = param "id"
 decodeEntryRedirect :: ActionM EntryRedirect
 decodeEntryRedirect = parsePayload parseJSON
 
+nameToContentType :: IsString a => String -> a
+nameToContentType x
+    | "css" `isSuffixOf` x = "text/css"
+    | otherwise = "text/plain"
+
 -- | Main execution loop.
 webloop :: PoolT -> ConfigSRV -> IO ()
 webloop db sys =
@@ -119,6 +128,11 @@ webloop db sys =
         renderEntry ref pk = liftIO (getEntry db sys ref pk) >>= either html (redirect . T.pack)
         invoke_ f  = liftIO (f db sys)
     in scotty (httpPort sys) $ do
+        get "/static/:name" $ do
+            name <- param "name"
+            fsName <- liftIO (getDataFileName ("/static/" ++ name))
+            setHeader "Content-Type" (nameToContentType name)
+            file fsName
         get "/entry/random" $
             invoke_ getRandom >>= redirect
         get "/entry/:id" $ do

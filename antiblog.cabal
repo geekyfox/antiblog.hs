@@ -13,9 +13,21 @@ category: Web
 build-type: Simple
 cabal-version: >=1.8
 
+data-files:
+    static/antiblog.css
+
 executable antiblog
   main-is: Antiblog/Main.hs
   hs-source-dirs: src
+  other-modules:
+    Antiblog.Layout
+    ,Common.Api
+    ,Common.Config
+    ,Common.Database
+    ,Common.Model
+    ,Common.Schema
+    ,Utils.Concierge
+    ,Utils.Data.Tagged
   ghc-options:
       -O2 -Wall -fno-warn-unused-do-bind -fno-warn-orphans
       -fno-warn-name-shadowing
@@ -52,6 +64,11 @@ executable antiblog
 executable antiwork
   main-is: Antiwork/Main.hs
   hs-source-dirs: src
+  other-modules:
+      Antisync.ApiClient
+      ,Antisync.CmdLine
+      ,Antisync.Config
+      ,Antisync.Parser
   ghc-options:
       -O2 -Wall -fno-warn-unused-do-bind -fno-warn-orphans
       -fno-warn-name-shadowing
