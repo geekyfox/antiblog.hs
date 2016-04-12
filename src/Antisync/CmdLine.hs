@@ -42,87 +42,78 @@ data ActionType = Status | Sync | Pump | Promote | DoNothing
 
 -- | What should be done according to command line arguments.
 data Action = Action {
-     actionType      :: ActionType
-    ,actionEndpoint  :: Maybe SystemName
+     actionType :: ActionType
+    ,actionEndpoint :: Maybe SystemName
     ,actionVerbosity :: Verbosity
-    ,actionFiles     :: [String]
+    ,actionFiles :: [String]
 }
 
 mkAction :: ActionType -> Action
 mkAction t = Action t Nothing Normal []
 
-ignoreArg :: Arg a
-ignoreArg = flagArg (\_ x -> Right x) ""
-
-targetFlag :: Flag Action
-targetFlag = flagReq ["target"]
-                     mutate
-                     "<name of remote endpoint>"
-                     "Use production server"
-    where
-        mutate value a = Right $ a { actionEndpoint = Just $ fromString value }
-    
 verboseFlag :: Flag Action
-verboseFlag = flagNone
-              ["verbose"]
-              mutate
-              "Print skipped entries (except not modified ones)"
-    where mutate a = a { actionVerbosity = Verbose }
+verboseFlag = flagNone ["verbose"]
+        (\a -> a { actionVerbosity = Verbose })
+        "Print skipped entries (except not modified ones)"
 
 veryVerboseFlag :: Flag Action
-veryVerboseFlag = flagNone
-                  ["very-verbose"]
-                  mutate
-                  "Print all skipped entries"
-    where mutate a = a { actionVerbosity = VeryVerbose }
+veryVerboseFlag = flagNone ["very-verbose"]
+        (\a -> a { actionVerbosity = VeryVerbose })
+        "Print all skipped entries"
 
-listFilesArg :: Arg Action
-listFilesArg = 
-    let upd v a = Right $ a { actionFiles = v:actionFiles a }
-    in Arg {
-        argValue   = upd,
-        argType    = "<files to upload>",
-        argRequire = True
+targetArg :: Arg Action
+targetArg = Arg
+    {argValue = \v a -> Right $ a { actionEndpoint = Just $ fromString v }
+    ,argType = "<name of remote endpoint>"
+    ,argRequire = True
     }
 
-statusMode :: Mode Action
-statusMode = mode
-    "status"
-    (mkAction Status)
-    "Compare status of local files to remote server"
-    ignoreArg
-    [targetFlag, verboseFlag, veryVerboseFlag]
+listFilesArg :: Arg Action
+listFilesArg = Arg
+    {argValue = \v a -> Right $ a { actionFiles = v:actionFiles a}
+    ,argType = "<files to upload>"
+    ,argRequire = True
+    }
 
-syncMode :: Mode Action
-syncMode = mode
-    "sync"
-    (mkAction Sync)
-    "Upload files to remote server"
-    listFilesArg
-    [targetFlag, verboseFlag, veryVerboseFlag]
+command :: ActionType -> Mode Action
+command x =
+    (modeEmpty (mkAction x))
+        {modeNames = [actionName x]
+        ,modeHelp = actionHelp x
+        ,modeArgs = actionArgs x
+        ,modeGroupFlags = toGroup (actionFlags x)
+        }
 
-pumpMode :: Mode Action
-pumpMode = mode
-    "pump"
-    (mkAction Pump)
-    "Continuously pump files to server"
-    listFilesArg
-    []
+actionName :: ActionType -> Name
+actionName Status = "status"
+actionName Sync = "sync"
+actionName Pump = "pump"
+actionName Promote = "promote"
 
-promoteMode :: Mode Action
-promoteMode = mode
-    "promote"
-    (mkAction Promote)
-    "Schedule entries to appear on front page"
-    listFilesArg
-    [targetFlag]
+actionHelp :: ActionType -> Help
+actionHelp Status = "Compare status of local files to remote server"
+actionHelp Sync = "Upload files to remote server"
+actionHelp Pump = "Continuously pump files to server"
+actionHelp Promote = "Schedule entries to appear on front page"
+
+actionArgs :: ActionType -> ([Arg Action], Maybe (Arg Action))
+actionArgs Status = ([targetArg], Nothing)
+actionArgs Sync = ([targetArg], Just listFilesArg)
+actionArgs Pump = ([targetArg], Just listFilesArg)
+actionArgs Promote = ([targetArg], Just listFilesArg)
+
+actionFlags :: ActionType -> [Flag Action]
+actionFlags Status = [verboseFlag, veryVerboseFlag]
+actionFlags Sync = [verboseFlag, veryVerboseFlag]
+actionFlags Pump = []
+actionFlags Promote = []
 
 compositeMode :: Mode Action
 compositeMode = modes
     "antisync"
     (mkAction DoNothing)
     "Command-line utility to synchronize antiblog posts"
-    [statusMode, syncMode, pumpMode, promoteMode]
+    (map command [Status, Sync, Pump, Promote])
 
 decideAction :: IO Action
 decideAction = processArgs compositeMode

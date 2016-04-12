@@ -36,7 +36,9 @@ import Data.Aeson
 import Data.List(find)
 import Data.String
 import qualified Data.Text as T
+import System.FilePath.Posix(combine)
 
+import Skulk.Deep
 import Skulk.Outcome
 
 import Common.Config
@@ -52,13 +54,13 @@ instance FromJSON SystemName where
 data Endpoint = EP {
     -- | Name of a system. `antisync` uses it to mark/locate
     --   entry IDs in the text files.
-      systemName   :: SystemName
+    systemName   :: SystemName
     -- | Base URL of a remote system. `antisync` uses it to construct
     --   system's API endpoint.
-    , remoteUrl    :: BaseURL
+    ,remoteUrl    :: BaseURL
     -- | Secret API key of a remote system. `antisync` uses it for
     --   authorization.
-    , remoteApiKey :: T.Text
+    ,remoteApiKey :: T.Text
 }
 
 instance FromJSON Endpoint where
@@ -72,34 +74,40 @@ apiUrl :: Endpoint -> String
 apiUrl = liftT (++ "api/") .  remoteUrl
 
 -- | Whole configuration file.
-data Config = CFG {
-    -- | Default server to use
-      defaultName :: SystemName
-    -- | All known servers
-    , servers     :: [Endpoint]
-}
+type Config = [Endpoint]
 
-instance FromJSON Config where
-    parseJSON (Object v) =
-        CFG <$> v .: "defaultServer"
-            <*> v .: "servers"
-    parseJSON _ = mzero        
+justDigest :: (a -> Maybe b) -> [a] -> Either a [b]
+justDigest f = go []
+    where
+        go acc [] = Right (reverse acc)
+        go acc (x:xs) = case f x of
+            Just y -> go (y:acc) xs
+            Nothing -> Left x
+
+digest :: ToString a => (a -> Maybe b) -> [a] -> Outcome  [b]
+digest f xs = case justDigest f xs of
+    Left msg -> Fail (toString msg)
+    Right xs -> OK xs
+
+instance ToString T.Text where
+    toString = T.unpack
 
 -- | Reads the configuration data from `~/.antisync/config.json`
-readConfig :: IO (Outcome Config)
-readConfig = loadHome ".antisync/config.json"
-
--- | Loads the config and looks up the default endpoint.
-loadDefault :: IO (Outcome Endpoint)
-loadDefault = liftM (>>= seek) readConfig
+readClientConfig :: IO (Outcome Config)
+readClientConfig = readConfig go ".antisync/antisync.conf"
     where
-        seek (CFG n es) = select n es
+        fetch :: ToString a => (a -> Maybe b) -> a -> Outcome b
+        fetch f x = case f x of
+            Just y -> OK y
+            Nothing -> Skip (toString x)
+        go k f = do
+            url <- shapeshift <$> (fetch f "url")
+            apiKey <- shapeshift <$> (fetch f "apiKey")
+            return $ EP (shapeshift k) url apiKey
 
 -- | Loads the config and looks up the endpoint by name.
 loadNamed :: SystemName -> IO (Outcome Endpoint)
-loadNamed n = liftM (>>= seek) readConfig
-    where
-        seek = select n . servers
+loadNamed n = readClientConfig >>== select n
 
 -- | Looks up endpoints by name.
 select :: SystemName -> [Endpoint] -> Outcome Endpoint
@@ -111,4 +119,6 @@ select n = maybe (fail msg) return . find match
 -- | Finds the suitable endpoint configuration and aborts the
 --   execution if none is found.        
 loadOrDie :: Maybe SystemName -> IO Endpoint
-loadOrDie = liftM exposeOrDie . maybe loadDefault loadNamed
+loadOrDie (Just n) = exposeOrDie <$> (loadNamed n)
+loadOrDie Nothing = error "System name is missing"
+

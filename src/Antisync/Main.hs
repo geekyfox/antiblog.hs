@@ -113,20 +113,19 @@ showStatus v = putStrLn . describe fun
 injectId :: Endpoint -> FilePath -> Int -> IO ()
 injectId sys fpath id = load >>= save
     where
-        prefix  = "## antiblog public " ++ toString (systemName sys) ++
+        prefix = "## antiblog public " ++ toString (systemName sys) ++
                   " " ++ show id ++ "\n"
-        access  = withBinaryFile fpath
-        load    = access ReadMode hGetContents
-        save c  = access WriteMode (put c)
+        access = withBinaryFile fpath
+        load = access ReadMode hGetContents
+        save c = access WriteMode (put c)
         put c h = hPutStr h $ prefix ++ c
 
 -- | Synchronizes single file with remote server.
 syncOne :: Endpoint -> EntryIndex -> FilePath -> IO (Outcome ())
-syncOne sys srv fp = approved >>>= submit
+syncOne sys srv fp = loaded >>== approve >>>= submit
     where
-        loaded, approved :: IO (Outcome File)
+        loaded :: IO (Outcome File)
         loaded = loadFile (systemName sys) fp
-        approved = loaded >>== approve
         approve :: File -> Outcome File
         approve e = decideStatus srv e >> return e
         save :: Int -> IO ()

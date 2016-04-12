@@ -20,25 +20,31 @@
 module Common.Config where
 
 import Control.Applicative
-import Control.Monad(mzero,liftM)
+import Control.Monad(join,mzero,liftM)
 import Data.Aeson
 import Data.String(IsString,fromString)
 import qualified Data.ByteString.Lazy as L
+import Data.HashMap.Strict(toList,lookup)
+import Data.Ini(Ini,parseIni,unIni,readIniFile)
 import qualified Data.Text as T
+import Data.Text.IO(readFile)
 
-import System.Directory(getHomeDirectory)
+import System.Directory(getHomeDirectory,doesFileExist)
 import System.FilePath.Posix(combine)
 
+import Skulk.Deep
 import Skulk.Outcome
 
 import Utils.Data.Tagged
+
+import Prelude hiding (readFile,lookup)
 
 -- | Typesafe wrapper around system's base URL.
 newtype BaseURL = BaseURL String deriving ToString
 
 instance IsString BaseURL where
     fromString x
-        | last x == '/' = BaseURL x
+        | (not $ null x) && (last x) == '/' = BaseURL x
         | otherwise = BaseURL $ x ++ "/"
 
 instance FromJSON BaseURL where
@@ -56,6 +62,27 @@ loadHome :: (FromJSON a) => FilePath -> IO (Outcome a)
 loadHome suffix = do
     prefix <- getHomeDirectory
     load $ combine prefix suffix
+
+fromEither :: Either String a -> Outcome a
+fromEither (Left msg) = Fail msg
+fromEither (Right v) = OK v
+
+readConfig :: (T.Text -> (T.Text -> Maybe T.Text) -> Outcome a) -> FilePath -> IO (Outcome [a])
+readConfig conv suffix = do
+    prefix <- getHomeDirectory
+    let fname = combine prefix suffix
+    ex <- doesFileExist fname
+    if ex
+        then do
+            let ini = fromEither <$> (readIniFile fname)
+            ini >>== (parseConfig conv)
+        else
+            return (OK [])
+    
+parseConfig :: (T.Text -> (T.Text -> Maybe T.Text) -> Outcome a) -> Ini -> Outcome [a]        
+parseConfig conv = allOK . map go . toList . unIni
+    where
+        go (k, v) = conv k (flip lookup v)
 
 newtype SiteTitle = SiteTitle String deriving (ToString, IsString)
 
@@ -93,4 +120,4 @@ instance FromJSON ConfigSRV where
 
 -- | Loads server settings from `~/<filename>`.
 serverConfig :: FilePath -> IO ConfigSRV
-serverConfig fp = exposeOrDie <$> loadHome fp
+serverConfig fp = exposeOrDie <$> load fp
