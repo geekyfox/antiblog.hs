@@ -4,7 +4,7 @@ module Main(main) where
 import Control.Monad(when)
 import System.Environment(getArgs)
 
-import Common.Config
+import Antiblog.Config
 import Common.Database
 
 main :: IO ()

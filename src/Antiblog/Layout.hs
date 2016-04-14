@@ -31,11 +31,11 @@ import Text.Blaze.Html.Renderer.Text
 import Text.RSS
 import Network.URI(parseURI)
 
-import Common.Config(BaseURL)
+import Antiblog.Config(BaseURL)
 import qualified Common.Model as M
 import Utils.Data.Tagged
 
-import qualified Common.Config as C
+import qualified Antiblog.Config as C
 
 data Augmented a = AUG {
      value :: a

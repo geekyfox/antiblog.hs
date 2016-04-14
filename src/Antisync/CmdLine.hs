@@ -21,7 +21,7 @@ import Data.String(fromString)
 import System.Console.CmdArgs.Explicit
 import Skulk.Outcome
 import Utils.Data.Tagged
-import Antisync.Config(SystemName)
+import Antiblog.Config(SystemName)
 
 -- | Verbosity level.
 data Verbosity = 

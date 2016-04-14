@@ -1,8 +1,7 @@
 
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Entrypoint module of `antiblog` executable.
-module Main(main) where
+module Antiblog.Routing where
 
 import Control.Applicative hiding (empty)
 import Control.Monad(liftM,liftM2,when)
@@ -19,7 +18,7 @@ import System.IO
 import Web.Scotty hiding (body)
 
 import Common.Api
-import Common.Config
+import Antiblog.Config
 import Common.Database
 import Common.Model
 import Utils.Data.Tagged
@@ -120,14 +119,12 @@ nameToContentType x
     | "css" `isSuffixOf` x = "text/css"
     | otherwise = "text/plain"
 
--- | Main execution loop.
-webloop :: PoolT -> ConfigSRV -> IO ()
-webloop db sys =
+routing db sys =
     let
         renderPage ix mtag = liftIO (getPage db sys ix mtag) >>= html
         renderEntry ref pk = liftIO (getEntry db sys ref pk) >>= either html (redirect . T.pack)
         invoke_ f  = liftIO (f db sys)
-    in scotty (httpPort sys) $ do
+    in do
         get "/static/:name" $ do
             name <- param "name"
             fsName <- liftIO (getDataFileName ("/static/" ++ name))
@@ -179,13 +176,3 @@ webloop db sys =
         notFound $ do
             status notFound404
             invoke_ getNotFound >>= html
-
--- | Entrypoint.
-main :: IO ()
-main = do
-    hSetBuffering stdout NoBuffering
-    args <- getArgs
-    when (length args /= 1) (error "Config file location is missing")
-    sys <- serverConfig (head args)    
-    db <- connect (dbConnString sys)
-    webloop db sys

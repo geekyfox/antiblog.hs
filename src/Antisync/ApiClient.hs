@@ -34,7 +34,7 @@ import Common.Api
 import Common.Model
 import Utils.Data.Tagged
 
-import Antisync.Config
+import Antiblog.Config
 
 -- | Picks headers with specific name from a header list.
 fetchHeaders :: String -> ResponseHeaders -> [String]

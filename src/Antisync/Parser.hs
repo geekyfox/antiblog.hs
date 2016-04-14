@@ -113,7 +113,7 @@ import Utils.Data.Tagged
 
 import qualified Common.Model as M
 
-import Antisync.Config(SystemName)
+import Antiblog.Config(SystemName)
 
 readInt :: String -> Maybe Int
 readInt s = case reads s of
