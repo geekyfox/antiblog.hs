@@ -4,6 +4,7 @@
 module Antiblog.Config where
 
 import Control.Applicative
+import Control.Arrow((***))
 import Control.Monad(join,mzero,liftM)
 import Data.Aeson
 import Data.ByteString.Lazy(readFile)
@@ -152,6 +153,6 @@ fromMaybe :: String -> Maybe a -> Outcome a
 fromMaybe msg = maybe (Fail msg) OK
 
 parseConfig :: Ini -> [(SystemName, Text -> Outcome Text)]
-parseConfig = map (\(k,v) -> (shapeshift k, impl v)) . toList . unIni
+parseConfig = map (shapeshift *** impl) . toList . unIni
     where
         impl v x = fromMaybe ("Key missing: " ++ unpack x) (x `lookup` v)

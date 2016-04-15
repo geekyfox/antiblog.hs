@@ -29,7 +29,6 @@ library
         ,Antiblog.Routing
         ,Antiblog.Syncer
         ,Antisync.ApiClient
-        ,Antisync.CmdLine
         ,Antisync.Parser
         ,Common.Api        
         ,Common.Database
@@ -89,5 +88,5 @@ executable antiwork
     
 executable antisync
     main-is: src/Antisync.hs
-    build-depends: base, antiblog
+    build-depends: base, antiblog, cmdargs
     default-language: Haskell2010

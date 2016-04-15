@@ -19,11 +19,25 @@ import Skulk.Outcome
 
 import Antiblog.Config
 import Antisync.ApiClient
-import Antisync.CmdLine
 import Antisync.Parser(parseText)
 import Common.Api
-import Common.Model
+import Common.Model hiding (Normal)
 import Utils.Data.Tagged
+
+-- | Verbosity level.
+data Verbosity = 
+    -- | Don't print `Skip` messages.
+    Normal
+    -- | Don't print "entry is not modified messages".
+    | Verbose      
+    -- | Print all messages.
+    | VeryVerbose
+
+-- | Matches an entry against verbosity setting.
+shouldIgnore :: Verbosity -> Outcome a -> Bool
+shouldIgnore Verbose (Skip "Not modified") = True
+shouldIgnore Normal  (Skip _) = True
+shouldIgnore _ _ = False
 
 -- | Shorthand type for the result of reading multiple files.
 type DataFS = [(FilePath, Outcome File)]
