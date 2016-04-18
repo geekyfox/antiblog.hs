@@ -27,14 +27,14 @@ import Antiblog.Layout hiding (baseUrl,tags,title,summary)
 
 import Paths_antiblog
 
-getNotFound :: PoolT -> ConfigSRV -> IO T.Text
+getNotFound :: PoolT -> Local -> IO T.Text
 getNotFound db cfg = renderNotFound <$> augm
     where
         tags = fetchTagCloud db
         augm = liftM (\ts -> comprise cfg ts ()) tags
 
 -- | Provides an entry page at given URL.
-getEntry :: PoolT -> ConfigSRV -> String -> PageKind -> IO (Either T.Text String)
+getEntry :: PoolT -> Local -> String -> PageKind -> IO (Either T.Text String)
 getEntry db cfg uid pk = do
     result <- fetchEntry db pk uid
     case result of
@@ -45,7 +45,7 @@ getEntry db cfg uid pk = do
             return $ Left $ renderEntry (comprise cfg tags entry)
 
 -- | Provides a list page at given URL.
-getPage :: PoolT -> ConfigSRV -> Index -> Maybe String -> IO T.Text
+getPage :: PoolT -> Local -> Index -> Maybe String -> IO T.Text
 getPage db cfg ix mtag = renderPage <$> augm
     where
         page = fetchPage db ix mtag
@@ -53,11 +53,11 @@ getPage db cfg ix mtag = renderPage <$> augm
         augm = liftM2 (comprise cfg) tags page
         
 -- | Provides an RSS feed.
-getFeed :: PoolT -> ConfigSRV -> IO String
+getFeed :: PoolT -> Local -> IO String
 getFeed db cfg = renderFeed cfg <$> fetchRssFeed db
 
 -- | Provides a random link.
-getRandom :: PoolT -> ConfigSRV -> IO T.Text
+getRandom :: PoolT -> Local -> IO T.Text
 getRandom db cfg = (T.pack . urlConcat (baseUrl cfg) . toString) <$> fetchRandomEntry db
 
 mparam :: (Parsable a) => T.Text -> ActionM (Maybe a)
@@ -65,13 +65,13 @@ mparam key = fmap Just (param key) `rescue` (\_ -> return Nothing)
 
 -- | Wrapper that validates that api_key in request matches one in
 --   config.
-secure :: ConfigSRV -> ActionM () -> ActionM ()
+secure :: Local -> ActionM () -> ActionM ()
 secure conf next = mparam "api_key" >>= validate
     where
-        validate Nothing       = refuse "api_key is missing"
+        validate Nothing = refuse "api_key is missing"
         validate (Just k)
             | k == apiKey conf = next
-            | otherwise        = refuse "api_key is invalid"
+            | otherwise = refuse "api_key is invalid"
         refuse msg = status forbidden403 >> text msg
 
 -- | Decodes params for entry create.

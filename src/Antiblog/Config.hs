@@ -6,7 +6,6 @@ module Antiblog.Config where
 import Control.Applicative
 import Control.Arrow((***))
 import Control.Monad(join,mzero,liftM)
-import Data.Aeson
 import Data.ByteString.Lazy(readFile)
 import Data.HashMap.Strict(HashMap,toList,lookup)
 import Data.Ini(Ini,parseIni,unIni,readIniFile)
@@ -16,7 +15,6 @@ import Data.Text(Text,unpack)
 import Data.Traversable
 import System.Directory(getHomeDirectory,doesFileExist)
 import System.FilePath.Posix(combine)
-
 
 import Prelude hiding (readFile,lookup)
 
@@ -30,9 +28,6 @@ instance ToString Text where
 
 newtype SiteTitle = SiteTitle String deriving (ToString, IsString)
 
-instance FromJSON SiteTitle where
-    parseJSON x = fromString <$> parseJSON x
-
 -- | Typesafe wrapper around system's base URL.
 newtype BaseURL = BaseURL String deriving ToString
 
@@ -41,17 +36,33 @@ instance IsString BaseURL where
         | not (null x) && last x == '/' = BaseURL x
         | otherwise = BaseURL $ x ++ "/"
 
-instance FromJSON BaseURL where
-    parseJSON x = fromString <$> parseJSON x
-
 -- | Typesafe wrapper around the name of the system.
 newtype SystemName = SystemName String deriving (Show, IsString, ToString, Eq)
 
+class Config a where
+    systemName :: a -> SystemName
+    load :: IO (Outcome [a])
+    digest :: (SystemName, Text -> Outcome Text) -> Outcome a
+
+-- | Information about a single endpoint.
+data Remote = Remote {
+    -- | Name of a system. `antisync` uses it to mark/locate
+    --   entry IDs in the text files.
+    remoteSystemName :: SystemName
+    -- | Base URL of a remote system. `antisync` uses it to construct
+    --   system's API endpoint.
+    ,remoteUrl :: BaseURL
+    -- | Secret API key of a remote system. `antisync` uses it for
+    --   authorization.
+    ,remoteApiKey :: Text
+    }
+
 -- | Runtime configuration for the server.
-data ConfigSRV = SRV {
+data Local = Local {
+    localSystemName :: SystemName
     -- | Base URL of a system. Used by `antiblog` as root for local
     --   hyperlinks.
-     baseUrl :: BaseURL
+    ,baseUrl :: BaseURL
     -- | Secret API key.
     ,apiKey :: Text
     -- | TCP port of webserver.
@@ -64,71 +75,34 @@ data ConfigSRV = SRV {
     ,hasMicroTag :: Bool
     }
 
--- | Information about a single endpoint.
-data Endpoint = EP {
-    -- | Name of a system. `antisync` uses it to mark/locate
-    --   entry IDs in the text files.
-    systemName :: SystemName
-    -- | Base URL of a remote system. `antisync` uses it to construct
-    --   system's API endpoint.
-    ,remoteUrl :: BaseURL
-    -- | Secret API key of a remote system. `antisync` uses it for
-    --   authorization.
-    ,remoteApiKey :: Text
-    }
+instance Config Remote where
+    systemName = remoteSystemName
+    load = readConfig ".antisync/antisync.conf" >>== (sequenceA . map digest)
+    digest (name, raw) = Remote name <$> str "url" <*> raw "apiKey"
+        where
+            str x = shapeshift <$> raw x
 
--- | Whole configuration file.
-type Config = [Endpoint]
-
--- | Gets an API endpoint URL (basically, just appends \"/api\" to
--- 'baseUrl')
-apiUrl :: Endpoint -> String
-apiUrl = liftT (++ "api/") .  remoteUrl
-
-instance FromJSON ConfigSRV where
-    parseJSON (Object v) =
-        SRV <$> v .: "url"
-            <*> v .: "apiKey"
-            <*> v .: "httpPort"
-            <*> v .: "dbConn"
-            <*> v .: "siteTitle"
-            <*> v .: "hasAuthor"
-            <*> v .: "hasPoweredBy"
-            <*> v .: "hasMicroTag"
-    parseJSON _ = mzero
-
--- | Loads settings from a file
-load :: (FromJSON a) => FilePath -> IO (Outcome a)
-load fname = (eitherToProc . eitherDecode) <$> readFile fname
-    where
-        eitherToProc (Left errmsg) = fail $ "Error parsing '" ++ fname ++ "': " ++ errmsg
-        eitherToProc (Right v) = return v
-
--- | Loads server settings from `~/<filename>`.
-serverConfig :: FilePath -> IO ConfigSRV
-serverConfig fp = exposeOrDie <$> load fp
+instance Config Local where
+    systemName = localSystemName
+    load = readConfig ".antiblog/antiblog.conf" >>== (sequenceA . map digest)
+    digest (name, raw) = Local name <$>
+            str "baseUrl" <*> raw "apiKey" <*> int "httpPort" <*>
+            str "dbConnString" <*> str "siteTitle" <*> bool "hasAuthor" <*>
+            bool "hasPoweredBy" <*> bool "hasMicroTag"
+        where
+            str x = shapeshift <$> raw x
+            int x = (read . shapeshift) <$> raw x
+            bool x = ((\x -> x == "yes") . shapeshift) <$> raw x
 
 -- | Finds the suitable endpoint configuration and aborts the
 --   execution if none is found.        
-loadOrDie :: Maybe SystemName -> IO Endpoint
-loadOrDie (Just n) = exposeOrDie <$> loadNamed n
-loadOrDie Nothing = error "System name is missing"
-
--- | Loads the config and looks up the endpoint by name.
-loadNamed :: SystemName -> IO (Outcome Endpoint)
-loadNamed n = readClientConfig >>== select n
-
--- | Reads the configuration data from `~/.antisync/antisync.conf`
-readClientConfig :: IO (Outcome Config)
-readClientConfig = readConfig ".antisync/antisync.conf" >>== (sequenceA . map digest)
-    where
-        digest :: (SystemName, Text -> Outcome Text) -> Outcome Endpoint
-        digest (name, raw) =
-            let str x = shapeshift <$> raw x
-            in EP name <$> str "url" <*> raw "apiKey"
+loadOrDie :: (Config a) => Maybe SystemName -> IO a
+loadOrDie n = case n of
+    Just n -> exposeOrDie <$> (load >>== select n)
+    Nothing -> error "System name is missing"
 
 -- | Looks up endpoints by name.
-select :: SystemName -> [Endpoint] -> Outcome Endpoint
+select :: (Config a) => SystemName -> [a] -> Outcome a
 select n = maybe (fail msg) return . find match
     where
         msg = liftT (\s -> "Endpoint not found in config.json: " ++ s) n

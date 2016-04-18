@@ -11,6 +11,6 @@ main :: IO ()
 main = do
     args <- getArgs
     when (length args /= 1) (error "Config file location is missing")
-    sys <- serverConfig (head args)
+    sys <- loadOrDie (Just $ SystemName $ head args)
     db <- connect (dbConnString sys)
     rotateEntries db >>= mapM_ putStrLn

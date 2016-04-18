@@ -60,14 +60,19 @@ query req = decode <$> withManager defaultManagerSettings protect
         handleError  = return . Fail . fmtHttpError
         decode x     = x >>= decodeData
 
+-- | Gets an API endpoint URL (basically, just appends \"/api\" to
+-- 'baseUrl')
+apiUrl :: Remote -> String
+apiUrl = liftT (++ "api/") .  remoteUrl
+
 -- | Prepares a request for querying specific API method.
-mkRequest :: String -> Endpoint -> IO Request
+mkRequest :: String -> Remote -> IO Request
 mkRequest method sys = setQueryString qs <$> parseUrl url
     where
         url = apiUrl sys ++ method
         qs  = [("api_key", Just $ encodeUtf8 $ remoteApiKey sys)]
 
-mkJsonPostRequest :: String -> Endpoint -> Value -> IO Request
+mkJsonPostRequest :: String -> Remote -> Value -> IO Request
 mkJsonPostRequest method sys payload = attachArgs <$> baseRequest
     where
         baseRequest = mkRequest method sys
@@ -75,7 +80,7 @@ mkJsonPostRequest method sys payload = attachArgs <$> baseRequest
         attachArgs  = urlEncodedBody encodedArgs
 
 -- | Prepares a request for POSTing to specific API method.
-mkPostRequest :: String -> Endpoint -> [(String, String)] -> IO Request
+mkPostRequest :: String -> Remote -> [(String, String)] -> IO Request
 mkPostRequest method sys args = attachArgs <$> baseRequest
     where
         baseRequest = mkRequest method sys
@@ -83,14 +88,14 @@ mkPostRequest method sys args = attachArgs <$> baseRequest
         attachArgs  = urlEncodedBody encodedArgs
 
 -- | Retrieves the list of entries on the server.
-retrieveIndex :: Endpoint -> IO (Outcome [StoredId])
+retrieveIndex :: Remote -> IO (Outcome [StoredId])
 retrieveIndex sys = mkRequest "index" sys >>= query
 
 -- | Shorthand type.
 type EntryIndex = Map Int MD5Sig
 
 -- | Retrieves the list of entries on server as `Map Int String`.
-queryIndexAsMap :: Endpoint -> IO (Outcome EntryIndex)
+queryIndexAsMap :: Remote -> IO (Outcome EntryIndex)
 queryIndexAsMap sys = fmap toMap <$> retrieveIndex sys
     where
         toMap es = fromList [ (a,b) | StoredId a b <- es ]
@@ -122,17 +127,17 @@ encodeRedirect r = object $
         ]
 
 -- | Updates an entry.
-updateEntry :: Endpoint -> StoredEntry -> IO (Outcome ReplyUP)
+updateEntry :: Remote -> StoredEntry -> IO (Outcome ReplyUP)
 updateEntry sys e = mkJsonPostRequest "update" sys (encodeStoredEntry e) >>= query
 
 -- | Creates an entry, returning new entry's ID on success.
-createEntry :: Endpoint -> NewEntry -> IO (Outcome ReplyCR)
+createEntry :: Remote -> NewEntry -> IO (Outcome ReplyCR)
 createEntry sys e = mkJsonPostRequest "create" sys (encodeNewEntry e) >>= query
 
-promoteEntry :: Endpoint -> Int -> IO (Outcome ReplyPR)
+promoteEntry :: Remote -> Int -> IO (Outcome ReplyPR)
 promoteEntry sys uid = mkPostRequest "promote" sys params >>= query
     where
         params = [("id", show uid)]
 
-updateRedirect :: Endpoint -> EntryRedirect -> IO (Outcome ReplyUP)
+updateRedirect :: Remote -> EntryRedirect -> IO (Outcome ReplyUP)
 updateRedirect sys e = mkJsonPostRequest "redirect" sys (encodeRedirect e) >>= query

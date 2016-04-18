@@ -62,7 +62,7 @@ class Entity a where
     entityUrl :: BaseURL -> a -> String
     entityText :: a -> Maybe (Either M.Body M.Summary)
 
-comprise :: (Entity a) => C.ConfigSRV -> [M.TagUsage] -> a -> Augmented a
+comprise :: (Entity a) => C.Local -> [M.TagUsage] -> a -> Augmented a
 comprise cfg tags x = AUG
     {value = x
     ,baseUrl = base
@@ -110,7 +110,7 @@ mkref w = href . fromString . urlConcat (baseUrl w)
 
 -- | Strips tags from HTML text
 stripTags :: String -> String
-stripTags []         = []
+stripTags [] = []
 stripTags ('<' : xs) = stripTags $ drop 1 $ dropWhile (/= '>') xs
 stripTags (x : xs)   = x : stripTags xs
 
@@ -118,9 +118,9 @@ stripTags (x : xs)   = x : stripTags xs
 opengraph :: Augmented a -> Html
 opengraph w =
     do
-        item "og:type"        "website"
-        item "og:title"       (shapeshift $ title w)
-        item "og:url"         (fromString $ ownUrl w)
+        item "og:type" "website"
+        item "og:title" (shapeshift $ title w)
+        item "og:url" (fromString $ ownUrl w)
         item "og:description" (shapeshift $ summary w)
     where
         item p v = meta ! property p ! content v
@@ -200,7 +200,7 @@ prettifyTag = map f
 patchTags :: Augmented a -> (b -> String) -> [b] -> [b]
 patchTags w f xs
   | hasMicroTag w = xs
-  | otherwise     = [ x | x <- xs, f x /= "micro" ]
+  | otherwise = [ x | x <- xs, f x /= "micro" ]
 
 layoutTagCloud :: Augmented a -> Html
 layoutTagCloud w
@@ -249,13 +249,11 @@ layoutEntryBarebone w@AUG{baseUrl = base} e =
         bodyClass = if tagless then "body tagless" else "body"
         self t = a ! href (permalink base e) $ t
         readMoreBlock = do
-                        br
-                        "[" ; self "read more" ; "]"
+            br
+            "[" ; self "read more" ; "]"
         taglink t   = do
-                        preEscapedText "&nbsp;"
-                        a ! mkref w ("/page/" ++ t)
-                          ! class_ "colored"
-                          $ fromString $ prettifyTag t
+            preEscapedText "&nbsp;"
+            a ! mkref w ("/page/" ++ t) ! class_ "colored" $ fromString $ prettifyTag t
         seriesLinksBlock =
             case listToMaybe $ M.seriesLinks e of
                  Nothing -> return ()
@@ -306,7 +304,7 @@ urlConcat base ('/':xs) = toString base ++ xs
 urlConcat base xs = toString base ++ xs
 
 -- | Renders the RSS feed.
-renderFeed :: C.ConfigSRV -> [M.RssEntry] -> String
+renderFeed :: C.Local -> [M.RssEntry] -> String
 renderFeed w items = showXML $ rssToXML feed
     where
         base = C.baseUrl w

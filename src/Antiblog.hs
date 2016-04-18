@@ -17,6 +17,6 @@ main = do
     hSetBuffering stdout NoBuffering
     args <- getArgs
     when (length args /= 1) (error "Config file location is missing")
-    sys <- serverConfig (head args)    
+    sys <- loadOrDie (Just $ SystemName $ head args)
     db <- connect (dbConnString sys)
     scotty (httpPort sys) $ routing db sys

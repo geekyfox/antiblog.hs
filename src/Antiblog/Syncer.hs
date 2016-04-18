@@ -53,7 +53,7 @@ loadFile sys fpath =
         fsize <- fileSize <$> getFileStatus fpath
         if fsize < 100000 then openAndDrain else retreat
 
-promote :: [FilePath] -> Endpoint -> IO ()
+promote :: [FilePath] -> Remote -> IO ()
 promote files sys = mapM_ workOne files
     where
         theFile :: FilePath -> IO (Outcome StoredEntry)
@@ -71,7 +71,7 @@ promote files sys = mapM_ workOne files
 
 
 -- | Syncronizes a list of files. Reports progress at given `Verbosity`.
-sync :: Verbosity -> [FilePath] -> Endpoint -> IO ()
+sync :: Verbosity -> [FilePath] -> Remote -> IO ()
 sync v files sys = msg >>= putStrLn
     where
         msg :: IO String
@@ -90,7 +90,7 @@ sync v files sys = msg >>= putStrLn
           | otherwise = fp ++ " => " ++ describe (const "OK") res ++ "\n"
 
 -- | Synchronizes single file with remote server.
-syncOne :: Endpoint -> EntryIndex -> FilePath -> IO (Outcome ())
+syncOne :: Remote -> EntryIndex -> FilePath -> IO (Outcome ())
 syncOne sys srv fp = loaded >>== approve >>>= submit
     where
         loaded :: IO (Outcome File)
@@ -124,7 +124,7 @@ decideStatusImpl srv e = case lookup (entryId e) srv of
     Just s -> if s == md5sig e then Skip "Not modified" else OK "Entry modified"
 
 -- | Inserts an ID to file on disk.
-injectId :: Endpoint -> FilePath -> Int -> IO ()
+injectId :: Remote -> FilePath -> Int -> IO ()
 injectId sys fpath id = load >>= save
     where
         prefix = "## antiblog public " ++ toString (systemName sys) ++
@@ -161,7 +161,7 @@ decideStatusM ix pe = pe >>= decideStatus ix
 type Status = Outcome [(FilePath, Outcome String)]
 
 -- | Reads file in the directory and decides their respective statuses.
-status :: FilePath -> Endpoint -> IO Status
+status :: FilePath -> Remote -> IO Status
 status root sys = liftM2 match local remote
     where
         local = loadDir (systemName sys) root
@@ -181,7 +181,7 @@ showStatus v = putStrLn . describe fun
             | otherwise = "[" ++ describe id ps ++ "] " ++ fp
   
 -- | Continuously runs in foreground and does `sync` every second.
-pump :: [FilePath] -> Endpoint -> IO ()
+pump :: [FilePath] -> Remote -> IO ()
 pump files sys =
     do
         sync Verbose files sys
