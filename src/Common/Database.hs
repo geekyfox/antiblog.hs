@@ -31,15 +31,15 @@ import Data.String(fromString)
 import Database.PostgreSQL.Simple hiding (connect)
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.ToField
-import Skulk.Deep((<$$>))
-
 import GHC.Int
 import System.Random(randomRIO)
+
+import Skulk.Deep((<$$>))
+import Skulk.ToString
 
 import Common.Api
 import Common.Model
 import Common.Schema(schema)
-import Utils.Data.Tagged
 
 import Utils.Concierge(arrange)
 
@@ -377,8 +377,8 @@ fetchEntryById conn pk uid =  do
             let hasMicro = not readMore
             tags <- fetchTagsFast conn uid hasMicro (isJust ml)
             let content = RenderContent ti (Left bd) tags
-            let symlink = liftT (\x -> "entry/" ++ x) <$> (sl :: Maybe String)
-            let metalink = liftT (\x -> "meta/" ++ x) <$> (ml :: Maybe String)
+            let symlink = liftT (\x -> "entry/" ++ x) <$> (sl :: Maybe Symlink)
+            let metalink = liftT (\x -> "meta/" ++ x) <$> (ml :: Maybe Metalink)
             let extra = SingleExtra symlink metalink pk sls
             return $ Just $ Left $ Entry uid content extra
 
@@ -453,7 +453,11 @@ recordOptionalData conn e uid = do
     mapM_ insertSeries series
     assignSymlinks conn uid (symlink e) (metalink e)
     
--- updateEntryImpl :: (HasHash a) => Connection -> Int -> Entry a StoredContent [SeriesRef] -> IO ()
+updateEntryImpl ::
+    (HasHash a
+    ,HasBody b, HasTags b, HasSummary b, HasTitle b
+    , HasSymlink c, HasSeriesRef c, HasMetalink c
+    ) => Connection -> Int -> Entry a b c -> IO ()
 updateEntryImpl conn uid e = do
     execute conn
         "UPDATE entry SET title = ?, teaser = ?, body = ? \
@@ -463,7 +467,7 @@ updateEntryImpl conn uid e = do
     recordOptionalData conn e uid
   where
       teaser = fromMaybe shortBody $ emptyToNothing (summary e)
-      shortBody = liftT trim (body e)
+      shortBody = shapeshift $ liftT trim (body e)
       trim s
           | length s < 600 = s
           | otherwise = let

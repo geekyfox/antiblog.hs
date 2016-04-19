@@ -33,11 +33,10 @@ library
         ,Common.Api        
         ,Common.Database
         ,Common.Model
-        ,Utils.Concierge
     other-modules:
         Paths_antiblog
         ,Common.Schema
-        ,Utils.Data.Tagged
+        ,Utils.Concierge        
         
     if impl(ghc < 7.6)
         build-depends:
@@ -50,7 +49,7 @@ library
 
     build-depends:
         base >=4.5 && <4.9
-        ,skulk >=0.1 && <0.2
+        ,skulk >=0.1.1 && <0.2
         ,aeson >=0.11.0.0 && <0.12
         ,blaze-html >=0.8.0.2 && <0.9
         ,bytestring >=0.10.6.0 && <0.11

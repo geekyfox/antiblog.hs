@@ -12,7 +12,7 @@ import Data.Either(isRight)
 import Data.String(IsString)
 import Data.Time.Clock
 
-import Utils.Data.Tagged
+import Skulk.ToString
 
 class Identified a where entryId :: a -> Int
 instance Identified Int where entryId = id

@@ -29,10 +29,10 @@ import Network.HTTP.Types.Header
 import Network.HTTP.Types.Status
 
 import Skulk.Outcome
+import Skulk.ToString
 
 import Common.Api
 import Common.Model
-import Utils.Data.Tagged
 
 import Antiblog.Config
 
@@ -60,16 +60,11 @@ query req = decode <$> withManager defaultManagerSettings protect
         handleError  = return . Fail . fmtHttpError
         decode x     = x >>= decodeData
 
--- | Gets an API endpoint URL (basically, just appends \"/api\" to
--- 'baseUrl')
-apiUrl :: Remote -> String
-apiUrl = liftT (++ "api/") .  remoteUrl
-
 -- | Prepares a request for querying specific API method.
 mkRequest :: String -> Remote -> IO Request
 mkRequest method sys = setQueryString qs <$> parseUrl url
     where
-        url = apiUrl sys ++ method
+        url = (toString $ remoteUrl sys) ++ "api/" ++ method
         qs  = [("api_key", Just $ encodeUtf8 $ remoteApiKey sys)]
 
 mkJsonPostRequest :: String -> Remote -> Value -> IO Request

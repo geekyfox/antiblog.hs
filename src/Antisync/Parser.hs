@@ -108,8 +108,7 @@ import Data.String(fromString)
 import Data.String.Utils(strip)
 
 import Skulk.Outcome
-
-import Utils.Data.Tagged
+import Skulk.ToString
 
 import qualified Common.Model as M
 

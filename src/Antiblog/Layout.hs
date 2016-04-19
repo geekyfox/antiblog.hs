@@ -31,9 +31,10 @@ import Text.Blaze.Html.Renderer.Text
 import Text.RSS
 import Network.URI(parseURI)
 
+import Skulk.ToString
+
 import Antiblog.Config(BaseURL)
 import qualified Common.Model as M
-import Utils.Data.Tagged
 
 import qualified Antiblog.Config as C
 
@@ -67,7 +68,7 @@ comprise cfg tags x = AUG
     {value = x
     ,baseUrl = base
     ,hasRssLink = entityHasRss x
-    ,title = liftT (\s -> s ++ suffix (entityTitle x)) generalTitle
+    ,title = fromString $ (toString generalTitle) ++ suffix (entityTitle x)
     ,ownUrl = entityUrl base x
     ,summary = liftT stripTags $ fromMaybe extendedTitle $ shapeshift <$> entityText x
     ,tags = tags
@@ -82,9 +83,9 @@ comprise cfg tags x = AUG
         generalTitle = C.siteTitle cfg
         extendedTitle :: M.Summary
         extendedTitle
-            | C.hasAuthor cfg = liftT (++ " by Ivan Appel") generalTitle
+            | C.hasAuthor cfg = fromString $ (toString generalTitle) ++ " by Ivan Appel"
             | otherwise = shapeshift generalTitle
-        suffix = maybe "" (liftT (\x -> ":" ++ x))
+        suffix = maybe "" (toString . liftT (\x -> ":" ++ x))
 
 instance Entity M.Page where
     entityHasRss _ = True
@@ -94,7 +95,7 @@ instance Entity M.Page where
         
 instance Entity M.SingleEntry where
     entityHasRss _ = False
-    entityTitle = Just . fromString . displayTitle
+    entityTitle = Just . displayTitle
     entityUrl = permalink
     entityText = Just . M.bodyOrSummary
 
@@ -127,7 +128,7 @@ opengraph w =
         property = customAttribute "property"
 
 -- | Display title of the entry (either title or #\$id)
-displayTitle :: (M.HasTitle a, M.Identified a, IsString b) => a -> b
+displayTitle :: (M.HasTitle a, M.Identified a) => a -> M.Title
 displayTitle e = liftT fmt (M.title e)
     where
         fmt "" = '#' : show (M.entryId e)
@@ -231,7 +232,7 @@ layoutEntryBarebone :: (M.HasSeriesLinks c, M.HasSymlink c, M.HasMetalink c, M.H
     => Augmented a -> M.Entry Int M.RenderContent c -> Html
 layoutEntryBarebone w@AUG{baseUrl = base} e =
     H.div ! class_ entryClass $ do
-        H.div ! class_ "header colored" $ self (displayTitle e)
+        H.div ! class_ "header colored" $ self (shapeshift $ displayTitle e)
         H.div ! class_ bodyClass $
             H.div ! class_ "stuff" $ do
                 seriesLinksBlock

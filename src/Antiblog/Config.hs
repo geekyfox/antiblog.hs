@@ -20,8 +20,7 @@ import Prelude hiding (readFile,lookup)
 
 import Skulk.Deep
 import Skulk.Outcome
-
-import Utils.Data.Tagged
+import Skulk.ToString
 
 instance ToString Text where
     toString = unpack
@@ -105,7 +104,7 @@ loadOrDie n = case n of
 select :: (Config a) => SystemName -> [a] -> Outcome a
 select n = maybe (fail msg) return . find match
     where
-        msg = liftT (\s -> "Endpoint not found in config.json: " ++ s) n
+        msg = "Endpoint not found in config.json: " ++ (toString n)
         match e = n == systemName e
 
 fromEither :: Either String a -> Outcome a
