@@ -101,11 +101,11 @@
 module Antisync.Parser where
 
 import Control.Monad(foldM)
-import Data.Hash.MD5
+import Data.Char(isSpace)
+import Data.Digest.Pure.MD5(md5)
 import Data.List(intercalate)
 import Data.Maybe(isJust,fromJust)
 import Data.String(fromString)
-import Data.String.Utils(strip)
 
 import Skulk.Outcome
 import Skulk.ToString
@@ -208,9 +208,12 @@ fullbody p = M.Body fullText
           | null footPart = mainPart
           | otherwise     = mainPart ++ "<hr/>" ++ footPart
 
+md5String :: String -> String
+md5String = show . md5 . fromString
+
 -- | Calculates MD5 signature of the parsed entry.
 signature :: Parser -> M.MD5Sig
-signature e = M.MD5Sig $ md5s $ Str $ concatMap (\f -> f e) $ case redirect e of
+signature e = M.MD5Sig $ md5String $ concatMap (\f -> f e) $ case redirect e of
     Just r ->
         [const r
         ,toString . symlink
@@ -248,13 +251,13 @@ buildFS p
 append :: Parser -> String -> Parser
 append p s =
     case state p of
-         Body | null $ strip s -> p {
+         Body | null $ dropWhile isSpace s -> p {
              body = Newline : Separator : body p
          }
          Body -> p {
              body = Newline : Raw s : body p
          }
-         Poem | null $ strip s -> p {
+         Poem | null $ dropWhile isSpace s -> p {
              body = Newline : Separator : body p
          }
          Poem -> p {
