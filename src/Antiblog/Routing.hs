@@ -28,11 +28,13 @@ import Antiblog.Layout hiding (baseUrl,tags,title,summary)
 
 import Paths_antiblog
 
+comprise :: PoolT -> Local -> a -> IO (RenderData a)
+comprise db cfg entity = do
+    tags <- fetchTagCloud db
+    return (cfg, tags, entity)
+
 getNotFound :: PoolT -> Local -> IO T.Text
-getNotFound db cfg = renderNotFound <$> augm
-    where
-        tags = fetchTagCloud db
-        augm = liftM (\ts -> comprise cfg ts ()) tags
+getNotFound db cfg = renderNotFound <$> (comprise db cfg ())
 
 -- | Provides an entry page at given URL.
 getEntry :: PoolT -> Local -> String -> PageKind -> IO (Either T.Text String)
@@ -41,17 +43,14 @@ getEntry db cfg uid pk = do
     case result of
         Nothing -> Left <$> getNotFound db cfg
         Just (Right redirect) -> return (Right redirect)
-        Just (Left entry) -> do
-            tags <- fetchTagCloud db
-            return $ Left $ renderEntry (comprise cfg tags entry)
+        Just (Left entry) -> (Left . renderEntry) <$> comprise db cfg entry
 
 -- | Provides a list page at given URL.
 getPage :: PoolT -> Local -> Index -> Maybe String -> IO T.Text
 getPage db cfg ix mtag = renderPage <$> augm
     where
         page = fetchPage db ix mtag
-        tags = fetchTagCloud db
-        augm = liftM2 (comprise cfg) tags page
+        augm = page >>= (comprise db cfg)
         
 -- | Provides an RSS feed.
 getFeed :: PoolT -> Local -> IO String
