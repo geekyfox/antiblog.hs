@@ -70,6 +70,8 @@ data Local = Local {
     ,dbConnString :: String
     ,siteTitle :: SiteTitle
     ,hasAuthor :: Bool
+    ,author :: String
+    ,authorHref :: String
     ,hasPoweredBy :: Bool
     ,hasMicroTag :: Bool
     }
@@ -87,11 +89,12 @@ instance Config Local where
     digest (name, raw) = Local name <$>
             str "baseUrl" <*> raw "apiKey" <*> int "httpPort" <*>
             str "dbConnString" <*> str "siteTitle" <*> bool "hasAuthor" <*>
+            str "author" <*> str "authorHref" <*>
             bool "hasPoweredBy" <*> bool "hasMicroTag"
         where
             str x = shapeshift <$> raw x
             int x = (read . shapeshift) <$> raw x
-            bool x = ((\x -> x == "yes") . shapeshift) <$> raw x
+            bool x = (("yes" ==) . shapeshift) <$> raw x
 
 -- | Finds the suitable endpoint configuration and aborts the
 --   execution if none is found.        
@@ -104,7 +107,7 @@ loadOrDie n = case n of
 select :: (Config a) => SystemName -> [a] -> Outcome a
 select n = maybe (fail msg) return . find match
     where
-        msg = "Endpoint not found in config.json: " ++ (toString n)
+        msg = "Endpoint not found in config.json: " ++ toString n
         match e = n == systemName e
 
 fromEither :: Either String a -> Outcome a

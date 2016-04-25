@@ -53,9 +53,11 @@ data Augmented a = AUG {
     -- | General title of the website
     ,siteTitle :: !C.SiteTitle
     ,hasAuthor :: !Bool
+    ,author :: String
+    ,authorHref :: String
     ,hasPoweredBy :: !Bool
     ,hasMicroTag :: !Bool
-}
+    }
 
 class Entity a where
     entityHasRss :: a -> Bool
@@ -68,12 +70,14 @@ comprise cfg tags x = AUG
     {value = x
     ,baseUrl = base
     ,hasRssLink = entityHasRss x
-    ,title = fromString $ (toString generalTitle) ++ suffix (entityTitle x)
+    ,title = fromString $ toString generalTitle ++ suffix (entityTitle x)
     ,ownUrl = entityUrl base x
     ,summary = liftT stripTags $ fromMaybe extendedTitle $ shapeshift <$> entityText x
     ,tags = tags
     ,siteTitle = C.siteTitle cfg
     ,hasAuthor = C.hasAuthor cfg
+    ,author = C.author cfg
+    ,authorHref = C.authorHref cfg
     ,hasPoweredBy = C.hasPoweredBy cfg
     ,hasMicroTag = C.hasMicroTag cfg
     }
@@ -83,7 +87,7 @@ comprise cfg tags x = AUG
         generalTitle = C.siteTitle cfg
         extendedTitle :: M.Summary
         extendedTitle
-            | C.hasAuthor cfg = fromString $ (toString generalTitle) ++ " by Ivan Appel"
+            | C.hasAuthor cfg = fromString $ toString generalTitle ++ " by " ++ toString (C.author cfg)
             | otherwise = shapeshift generalTitle
         suffix = maybe "" (toString . liftT (\x -> ":" ++ x))
 
@@ -180,11 +184,11 @@ layoutStamp w =
         when (hasAuthor w) $
             H.div ! class_ "page-subheader" $ do
                 "by "
-                a ! href "http://www.geekyfox.net" $ "Ivan Appel"
+                a ! href (shapeshift $ authorHref w) $ (shapeshift $ author w)
         when (hasPoweredBy w) $
             H.div ! class_ "page-subheader" $ do
                 "powered by "
-                a ! href "http://antiblog.geekyfox.net" $ "The Antiblog"
+                a ! href "http://github.com/geekyfox/antiblog" $ "The Antiblog"
         H.div ! class_ "page-subheader" $ do
             hr
             a ! mkref w "meta/about" $ "About"

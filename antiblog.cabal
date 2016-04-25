@@ -82,7 +82,7 @@ executable antiblog
 
 executable antiwork
     main-is: src/Antiwork.hs
-    build-depends: base, antiblog
+    build-depends: base, antiblog, cmdargs
     default-language: Haskell2010
     
 executable antisync

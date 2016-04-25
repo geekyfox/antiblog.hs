@@ -64,7 +64,7 @@ query req = decode <$> withManager defaultManagerSettings protect
 mkRequest :: String -> Remote -> IO Request
 mkRequest method sys = setQueryString qs <$> parseUrl url
     where
-        url = (toString $ remoteUrl sys) ++ "api/" ++ method
+        url = toString (remoteUrl sys) ++ "api/" ++ method
         qs  = [("api_key", Just $ encodeUtf8 $ remoteApiKey sys)]
 
 mkJsonPostRequest :: String -> Remote -> Value -> IO Request
