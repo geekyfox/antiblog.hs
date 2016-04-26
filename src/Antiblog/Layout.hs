@@ -1,6 +1,8 @@
+
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE CPP #-}
 
 -- | All generation of HTML pages happens here.
 --
@@ -13,9 +15,14 @@
 
 module Antiblog.Layout where
 
+#if __GLASGOW_HASKELL__ < 710
 import Control.Applicative
+#endif
 import Control.Monad(when, unless)
-import Data.String(IsString,fromString)
+#if __GLASGOW_HASKELL__ < 708
+import Data.String(IsString)
+#endif
+import Data.String(fromString)
 import Data.Maybe(fromMaybe,listToMaybe,catMaybes,fromJust)
 import Data.Text.Lazy(Text)
 import Text.Blaze.Html4.Strict hiding (title,map)
@@ -195,7 +202,7 @@ layoutTagCloud cfg tags
 
 -- | Attaches the common header to content.
 layoutCommon :: (Entity a) => (Local -> a -> Html) -> RenderData a -> Html
-layoutCommon innerFunc w@(cfg, tags, entity) =
+layoutCommon innerFunc (cfg, tags, entity) =
     html $ do
         htmlHead cfg entity
         body $

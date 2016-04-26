@@ -5,10 +5,8 @@ module Antiblog.Config where
 
 import Control.Applicative
 import Control.Arrow((***))
-import Control.Monad(join,mzero,liftM)
-import Data.ByteString.Lazy(readFile)
-import Data.HashMap.Strict(HashMap,toList,lookup)
-import Data.Ini(Ini,parseIni,unIni,readIniFile)
+import Data.HashMap.Strict(toList,lookup)
+import Data.Ini(Ini,unIni,readIniFile)
 import Data.List(find)
 import Data.String
 import Data.Text(Text,unpack)
@@ -94,7 +92,7 @@ instance Config Local where
         where
             str x = shapeshift <$> raw x
             int x = (read . shapeshift) <$> raw x
-            bool x = (("yes" ==) . shapeshift) <$> raw x
+            bool x = (("yes" ==) . toString) <$> raw x
 
 -- | Finds the suitable endpoint configuration and aborts the
 --   execution if none is found.        

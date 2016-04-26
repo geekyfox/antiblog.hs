@@ -2,12 +2,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE CPP #-}
 
 -- | Data model of client-server API.
 
 module Common.Api where
 
+#if __GLASGOW_HASKELL__ < 710
 import Control.Applicative
+#endif
 import Control.Monad(mzero)
 import Data.Aeson
 import Data.ByteString(ByteString)

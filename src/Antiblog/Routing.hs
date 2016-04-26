@@ -1,10 +1,12 @@
 
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
 
 module Antiblog.Routing where
 
+#if __GLASGOW_HASKELL__ < 710
 import Control.Applicative hiding (empty)
-import Control.Monad(liftM,liftM2,when)
+#endif
 import Control.Monad.IO.Class(liftIO)
 import Data.Aeson hiding (json,Number)
 import Data.Aeson.Types hiding (Number)
@@ -13,8 +15,6 @@ import Data.List(isSuffixOf)
 import qualified Data.Text.Lazy as T
 import Data.String(IsString)
 import Network.HTTP.Types.Status(forbidden403, notFound404)
-import System.Environment(getArgs)
-import System.IO
 import Web.Scotty hiding (body)
 
 import Skulk.ToString
@@ -24,7 +24,7 @@ import Antiblog.Config
 import Common.Database
 import Common.Model
 
-import Antiblog.Layout hiding (baseUrl,tags,title,summary)
+import Antiblog.Layout hiding (title,summary)
 
 import Paths_antiblog
 
@@ -95,7 +95,8 @@ parsePayload f = do
 decodeEntry :: (Object -> Parser a) -> ActionM (Entry a StoredContent StoredExtra)
 decodeEntry uidfun = parsePayload go
     where
-        go (Object v) = do
+        go x = do
+            let (Object v) = x
             uid <- uidfun v
             body <- v .: "body"
             title <- nothingToEmpty <$> (v .:? "title")
