@@ -3,6 +3,7 @@ module Main(main) where
 
 import Data.String
 import System.Console.CmdArgs.Explicit
+import Antiblog.Api
 import Antiblog.Config
 import Antiblog.Syncer
 
@@ -62,25 +63,25 @@ mkMode name task help hasFiles hasVerbosity = mode
 statusMode :: Mode Action
 statusMode = mkMode "status" go help False True
     where
-        go sys v _ = loadOrDie sys >>= status "." >>= showStatus v
+        go sys v _ = mkClient sys >>= status "." >>= showStatus v
         help = "Compare status of local files to remote server"
 
 syncMode :: Mode Action
 syncMode = mkMode "sync" go help True True
     where
-        go sys v fs = loadOrDie sys >>= sync v fs
+        go sys v fs = mkClient sys >>= sync v fs
         help = "Upload files to remote server"
 
 pumpMode :: Mode Action
 pumpMode = mkMode "pump" go help True False
     where
-        go sys _ fs = loadOrDie sys >>= pump fs
+        go sys _ fs = mkClient sys >>= pump fs
         help = "Continuously pump files to server"
 
 promoteMode :: Mode Action
 promoteMode = mkMode "promote" go help True False
     where
-        go sys _ fs = loadOrDie sys >>= promote fs
+        go sys _ fs = mkClient sys >>= promote fs
         help = "Schedule entries to appear on front page"
 
 helpAction :: Action

@@ -37,7 +37,6 @@ import System.Random(randomRIO)
 import Skulk.Deep((<$$>))
 import Skulk.ToString
 
-import Common.Api
 import Common.Model
 import Common.Schema(schema)
 
@@ -53,12 +52,12 @@ connect cs = do
     withResource db (`arrange` schema)
     return db
 
-createEntry :: PoolT -> QueryCR -> IO ReplyCR
-createEntry p q = AM <$> withResource p (`createEntryImpl` q)
+createEntry :: PoolT -> NewEntry -> IO Int
+createEntry p q = withResource p (`createEntryImpl` q)
 
 -- | Updates an entry.
-updateEntry :: PoolT -> QueryUP -> IO ReplyUP
-updateEntry p e = AM <$> withResource p (\c -> updateEntryImpl c (entryId e) e)
+updateEntry :: PoolT -> StoredEntry -> IO ()
+updateEntry p e = withResource p (\c -> updateEntryImpl c (entryId e) e)
 
 -- | Retrieves a single entry at particular URL or 'Nothing' if
 --   no matching entry found.
@@ -92,8 +91,8 @@ rotateEntries :: PoolT -> IO [String]
 rotateEntries p = withResource p rotateEntriesImpl
 
 -- | Updates a redirect to an entry.
-updateRedirect :: PoolT -> EntryRedirect -> IO ReplyUP
-updateRedirect p e = AM <$> withResource p (`updateRedirectImpl` e)
+updateRedirect :: PoolT -> EntryRedirect -> IO ()
+updateRedirect p e = withResource p (`updateRedirectImpl` e)
 
 --
 -- Public API ends here.
@@ -490,7 +489,7 @@ updateRedirectImpl conn r = do
     assignSymlinks conn (entryId r) (symlink r) (metalink r)
 
 -- | Creates a new entry and returns an assigned ID.
-createEntryImpl :: Connection -> QueryCR -> IO Int
+createEntryImpl :: Connection -> NewEntry -> IO Int
 createEntryImpl conn e = do
     [Only uid] <- query_ conn
                            "SELECT id FROM (      \

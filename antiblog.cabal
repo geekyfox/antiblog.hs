@@ -20,17 +20,18 @@ library
     hs-source-dirs: src
     default-language: Haskell2010
     ghc-options:
-        -Wall -fno-warn-unused-do-bind -fno-warn-orphans
+        -Wall 
+        -fno-warn-unused-do-bind
+        -fno-warn-orphans
         -fno-warn-name-shadowing
         -fno-warn-missing-signatures
     exposed-modules:
-        Antiblog.Config
+        Antiblog.Api
+        ,Antiblog.Config
         ,Antiblog.Layout
         ,Antiblog.Routing
         ,Antiblog.Syncer
-        ,Antisync.ApiClient
         ,Antisync.Parser
-        ,Common.Api        
         ,Common.Database
         ,Common.Model
     other-modules:
@@ -46,11 +47,10 @@ library
     if impl(ghc < 7.10)
         build-depends:
             ini == 0.3.3
-            ,binary == 0.8.2.1
 
     build-depends:
-        base >=4.5 && <4.9
-        ,skulk >=0.1.1 && <0.2
+        base >=4.5 && <4.10
+        ,skulk >=0.1.2 && <0.2
         ,aeson >=0.11.0.0 && <0.12
         ,blaze-html >=0.8.0.2 && <0.9
         ,bytestring >=0.10.6.0 && <0.11

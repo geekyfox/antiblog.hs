@@ -19,7 +19,7 @@ import Web.Scotty hiding (body)
 
 import Skulk.ToString
 
-import Common.Api
+import Antiblog.Api(ApiMessage(AM))
 import Antiblog.Config
 import Common.Database
 import Common.Model
@@ -34,7 +34,7 @@ comprise db cfg entity = do
     return (cfg, tags, entity)
 
 getNotFound :: PoolT -> Local -> IO T.Text
-getNotFound db cfg = renderNotFound <$> (comprise db cfg ())
+getNotFound db cfg = renderNotFound <$> comprise db cfg ()
 
 -- | Provides an entry page at given URL.
 getEntry :: PoolT -> Local -> String -> PageKind -> IO (Either T.Text String)
@@ -50,7 +50,7 @@ getPage :: PoolT -> Local -> Index -> Maybe String -> IO T.Text
 getPage db cfg ix mtag = renderPage <$> augm
     where
         page = fetchPage db ix mtag
-        augm = page >>= (comprise db cfg)
+        augm = page >>= comprise db cfg
         
 -- | Provides an RSS feed.
 getFeed :: PoolT -> Local -> IO String
@@ -75,11 +75,11 @@ secure conf next = mparam "api_key" >>= validate
         refuse msg = status forbidden403 >> text msg
 
 -- | Decodes params for entry create.
-decodeEntryCreate :: ActionM QueryCR
+decodeEntryCreate :: ActionM NewEntry
 decodeEntryCreate = decodeEntry (\v -> NewId <$> v .: "signature")
 
 -- | Decodes params for entry update.
-decodeEntryUpdate :: ActionM QueryUP
+decodeEntryUpdate :: ActionM StoredEntry
 decodeEntryUpdate = decodeEntry (\v -> StoredId <$> v .: "id" <*> v .: "signature")
 
 parsePayload :: (Value -> Parser a) -> ActionM a
@@ -122,8 +122,8 @@ nameToContentType x
 
 routing db sys =
     let
-        renderPage ix mtag = liftIO (getPage db sys ix mtag) >>= html
-        renderEntry ref pk = liftIO (getEntry db sys ref pk) >>= either html (redirect . T.pack)
+        page ix mtag = liftIO (getPage db sys ix mtag) >>= html
+        entry ref pk = liftIO (getEntry db sys ref pk) >>= either html (redirect . T.pack)
         invoke_ f  = liftIO (f db sys)
     in do
         get "/static/:name" $ do
@@ -135,45 +135,45 @@ routing db sys =
             invoke_ getRandom >>= redirect
         get "/entry/:id" $ do
             ref <- param "id"
-            renderEntry ref Normal
+            entry ref Normal
         get "/page/:id" $ do
             (ix, mtag) <- parseRef <$> param "id"
-            renderPage ix mtag
+            page ix mtag
         get "/page/:tag/:id" $ do
             mix <- parseIndex <$> param "id"
             tag <- param "tag"
             case mix of
-                 Just ix -> renderPage ix (Just tag)
+                 Just ix -> page ix (Just tag)
                  Nothing -> invoke_ getNotFound >>= html
         get "/" $
-            renderPage (Number 1) Nothing
+            page (Number 1) Nothing
         get "/meta/:id" $ do
             ref <- param "id"
             case parseIndex ref of
-                 Just ix -> renderPage ix (Just "meta")
-                 Nothing -> renderEntry ref Meta
+                 Just ix -> page ix (Just "meta")
+                 Nothing -> entry ref Meta
         get "/rss.xml" $ do
             setHeader "Content-Type" "text/xml"            
             (C.pack <$> invoke_ getFeed) >>= raw
         get "/api/index" $ secure sys $ do
             index <- liftIO (fetchEntryIndex db)
-            json index
+            json (index :: [StoredId])
         post "/api/update" $ secure sys $ do
             e <- decodeEntryUpdate
-            result <- liftIO (updateEntry db e)
-            json result
+            liftIO (updateEntry db e)
+            json $ AM ()
         post "/api/create" $ secure sys $ do
             e <- decodeEntryCreate
-            result <- liftIO (createEntry db e)
-            json result
+            n <- liftIO (createEntry db e)
+            json $ AM (n :: Int)
         post "/api/promote" $ secure sys $ do
-            uid <- decodeEntryPromote
-            result <- liftIO (promoteEntry db uid)
-            json $ AM result
+            n <- decodeEntryPromote
+            liftIO (promoteEntry db n)
+            json $ AM ()
         post "/api/redirect" $ secure sys $ do
             e <- decodeEntryRedirect
-            result <- liftIO (updateRedirect db e)
-            json result
+            liftIO (updateRedirect db e)
+            json $ AM ()
         notFound $ do
             status notFound404
             invoke_ getNotFound >>= html

@@ -1,17 +1,21 @@
+{-# LANGUAGE CPP #-}
+
 module Antiblog.Syncer where
 
 import Prelude hiding (lookup)
 
+#if __GLASGOW_HASKELL__ < 710
 import Control.Applicative
+#endif
 import Control.Arrow(second)
 import Control.Concurrent(threadDelay)
-import Control.Monad(liftM2, filterM)
+import Control.Monad(filterM)
 import Data.List(intercalate)
 import Data.Map(lookup)
+
 import System.IO(IOMode(ReadMode,WriteMode), withBinaryFile, hPutStr)
 import System.IO.Strict(hGetContents)
 import System.Directory(doesDirectoryExist, doesFileExist, getDirectoryContents)
-
 import System.Posix (fileSize, getFileStatus)
 
 import Skulk.Deep
@@ -19,9 +23,8 @@ import Skulk.Outcome
 import Skulk.ToString
 
 import Antiblog.Config
-import Antisync.ApiClient
+import Antiblog.Api
 import Antisync.Parser(parseText)
-import Common.Api
 import Common.Model hiding (Normal)
 
 -- | Verbosity level.
@@ -53,57 +56,46 @@ loadFile sys fpath =
         fsize <- fileSize <$> getFileStatus fpath
         if fsize < 100000 then openAndDrain else retreat
 
-promote :: [FilePath] -> Remote -> IO ()
-promote files sys = mapM_ workOne files
+promote :: [FilePath] -> Client -> IO ()
+promote files client = mapM_ workOne files
     where
-        theFile :: FilePath -> IO (Outcome StoredEntry)
-        theFile f = loadFile (systemName sys) f >>== onlyEntry
-        workOne :: FilePath -> IO ()
-        workOne f = theFile f >>>= process >>= render f
-        process :: StoredEntry -> IO (Outcome ReplyPR)
-        process x = promoteEntry sys $ entryId x
-        render :: FilePath -> Outcome a -> IO ()
-        render f p = putStrLn $ f ++ " => " ++ describe (const "OK") p
-        onlyEntry :: File -> Outcome StoredEntry
-        onlyEntry (New _) = Skip "New entries are not promoted"
-        onlyEntry (Redirect _) = Skip "Redirected entries are not promoted"
-        onlyEntry (Stored x) = OK x
-
+        workOne path = do
+            result <- checkOne path
+            putStrLn $ path ++ " => " ++ describe (const "OK") result
+        checkOne path = do
+            loaded <- loadFile (systemName $ snd client) path
+            reduceBAB $ do
+                file <- loaded
+                case file of
+                    (New _) -> Skip "New entries are not promoted"
+                    (Redirect _) -> Skip "Redirected entries are not promoted" 
+                    (Stored entry) -> OK $ promoteEntry client $ entryId entry
 
 -- | Syncronizes a list of files. Reports progress at given `Verbosity`.
-sync :: Verbosity -> [FilePath] -> Remote -> IO ()
-sync v files sys = msg >>= putStrLn
+sync :: Verbosity -> [FilePath] -> Client -> IO ()
+sync v files c = output >>= putStrLn
     where
-        msg :: IO String
-        msg = do
-            oix <- queryIndexAsMap sys
-            case toEither oix of
-                Left msg -> return msg
-                Right ix -> work ix
+        output :: IO String
+        output = queryIndexAsMap c >>= (either return work . toEither)
         work :: EntryIndex -> IO String
         work srv = concat <$> mapM (workOne srv) files
-        workOne :: EntryIndex -> FilePath -> IO String
-        workOne srv fp = report fp <$> syncOne sys srv fp
-        report :: FilePath -> Outcome a -> String
+        workOne srv fp = report fp <$> syncOne c srv fp
         report fp res
           | shouldIgnore v res = ""
           | otherwise = fp ++ " => " ++ describe (const "OK") res ++ "\n"
 
 -- | Synchronizes single file with remote server.
-syncOne :: Remote -> EntryIndex -> FilePath -> IO (Outcome ())
-syncOne sys srv fp = loaded >>== approve >>>= submit
-    where
-        loaded :: IO (Outcome File)
-        loaded = loadFile (systemName sys) fp
-        approve :: File -> Outcome File
-        approve e = decideStatus srv e >> return e
-        save :: Int -> IO ()
-        save = injectId sys fp
-        submit :: File -> IO (Outcome ())
-        submit (New e) = (unfold <$$> createEntry sys e) >=>= save
-        submit (Stored e) = unfold <$$> updateEntry sys e
-        submit (Redirect e) = unfold <$$> updateRedirect sys e
-        unfold (AM x) = x
+syncOne :: Client -> EntryIndex -> FilePath -> IO (Outcome ())
+syncOne client index path = do
+    let sys = systemName $ snd client
+    loaded <- loadFile sys path
+    reduceBAB $ do
+        entry <- loaded
+        decideStatus index entry
+        return $ case entry of
+                New e -> createEntry client e >=>= injectId sys path
+                Stored e -> updateEntry client e
+                Redirect e -> updateRedirect client e
 
 -- | Matches the entry against the index. Meaning of return value is:
 --
@@ -124,21 +116,15 @@ decideStatusImpl srv e = case lookup (entryId e) srv of
     Just s -> if s == md5sig e then Skip "Not modified" else OK "Entry modified"
 
 -- | Inserts an ID to file on disk.
-injectId :: Remote -> FilePath -> Int -> IO ()
-injectId sys fpath id = load >>= save
-    where
-        prefix = "## antiblog public " ++ toString (systemName sys) ++
-                  " " ++ show id ++ "\n"
-        access = withBinaryFile fpath
-        load = access ReadMode hGetContents
-        save c = access WriteMode (put c)
-        put c h = hPutStr h $ prefix ++ c
+injectId :: SystemName -> FilePath -> Int -> IO ()
+injectId sys path eid = do
+    text <- withBinaryFile path ReadMode hGetContents
+    let prefix = "## antiblog public "  ++ toString sys ++ " " ++ show eid ++ "\n"
+    withBinaryFile path WriteMode (\h -> hPutStr h $ prefix ++ text)
 
 -- | Reads and parses multiple files.
 loadFiles :: SystemName -> [FilePath] -> IO DataFS
-loadFiles sys = mapM parseOne
-    where
-        parseOne name = (,) name <$> loadFile sys name
+loadFiles sys = mapM (\name -> (,) name <$> loadFile sys name)
 
 -- | Lookups files in directory.
 directoryScan :: FilePath -> IO [FilePath]
@@ -161,15 +147,12 @@ decideStatusM ix pe = pe >>= decideStatus ix
 type Status = Outcome [(FilePath, Outcome String)]
 
 -- | Reads file in the directory and decides their respective statuses.
-status :: FilePath -> Remote -> IO Status
-status root sys = liftM2 match local remote
-    where
-        local = loadDir (systemName sys) root
-        remote = queryIndexAsMap sys
-        match local pix = do
-            ix <- pix
-            let decide = decideStatusM ix
-            return $ map (second decide) local
+status :: FilePath -> Client -> IO Status
+status root client = do
+    let sys = systemName $ snd client
+    localFiles <- loadDir sys root
+    let analyze index = map (second (decideStatusM index)) localFiles
+    analyze <$$> queryIndexAsMap client
         
 -- | Prints status with given verbosity to stdout.
 showStatus :: Verbosity -> Status -> IO ()
@@ -181,9 +164,9 @@ showStatus v = putStrLn . describe fun
             | otherwise = "[" ++ describe id ps ++ "] " ++ fp
   
 -- | Continuously runs in foreground and does `sync` every second.
-pump :: [FilePath] -> Remote -> IO ()
-pump files sys =
+pump :: [FilePath] -> Client -> IO ()
+pump files c =
     do
-        sync Verbose files sys
+        sync Verbose files c
         threadDelay 1000000
-        pump files sys
+        pump files c

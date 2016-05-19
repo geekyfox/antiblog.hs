@@ -41,7 +41,7 @@ import Network.URI(parseURI)
 import Skulk.ToString
 
 import qualified Common.Model as M
-import Antiblog.Config hiding (fromMaybe)
+import Antiblog.Config
 
 class Entity a where
     entityHasRss :: a -> Bool
@@ -66,10 +66,10 @@ title cfg entity = fromString $ toString (siteTitle cfg) ++ suffix
     where
         suffix = case entityTitle entity of
             Nothing -> ""
-            Just s -> ": " ++ (toString s)
+            Just s -> ": " ++ toString s
 
 ownUrl :: (Entity a) => Local -> a -> String
-ownUrl cfg entity = entityUrl (baseUrl cfg) entity
+ownUrl cfg = entityUrl (baseUrl cfg)
 
 instance Entity M.Page where
     entityHasRss _ = True
@@ -164,7 +164,7 @@ layoutStamp cfg =
         when (hasAuthor cfg) $
             H.div ! class_ "page-subheader" $ do
                 "by "
-                a ! href (shapeshift $ authorHref cfg) $ (shapeshift $ author cfg)
+                a ! href (shapeshift $ authorHref cfg) $ shapeshift (author cfg)
         when (hasPoweredBy cfg) $
             H.div ! class_ "page-subheader" $ do
                 "powered by "
@@ -192,7 +192,7 @@ layoutTagCloud cfg tags
       | null ts = return ()
       | otherwise = (H.div ! class_ "tag-cloud") $ mapM_ one ts
     where
-        ts = patchTags cfg (\(M.TagUsage s _) -> s) $ tags
+        ts = patchTags cfg (\(M.TagUsage s _) -> s) tags
         one (M.TagUsage tag count) =
             H.div ! class_ (fromString $ classify count) $
                 H.div ! class_ "colored" $
