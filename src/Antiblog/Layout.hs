@@ -19,11 +19,8 @@ module Antiblog.Layout where
 import Control.Applicative
 #endif
 import Control.Monad(when, unless)
-#if __GLASGOW_HASKELL__ < 708
-import Data.String(IsString)
-#endif
-import Data.String(fromString)
-import Data.Maybe(fromMaybe,listToMaybe,catMaybes,fromJust)
+import Data.String(IsString, fromString)
+import Data.Maybe(fromMaybe,listToMaybe,catMaybes)
 import Data.Text.Lazy(Text)
 import Text.Blaze.Html4.Strict hiding (title,map)
 import qualified Text.Blaze.Html4.Strict as H
@@ -35,8 +32,11 @@ import Text.Blaze.Html4.Strict.Attributes hiding
 import qualified Text.Blaze.Html4.Strict.Attributes as A
 import Text.Blaze.Html.Renderer.Text
 --import Text.Blaze.Internal(preEscapedText)
-import Text.RSS
-import Network.URI(parseURI)
+import Text.Feed.Types
+import Text.Feed.Util
+import Text.RSS.Export
+import Text.RSS.Syntax
+import Text.XML.Light.Output
 
 import Skulk.ToString
 
@@ -119,7 +119,8 @@ displayTitle e = liftT fmt (M.title e)
         fmt st = st
 
 -- | Permanent link of the entry.
--- permalink :: (HasSymlink a, HashMetalink a, HasPageKind a, Identified a, IsString b) => BaseURL -> M.EntryData -> b
+permalink :: (M.HasSymlink c, M.HasMetalink c, M.HasPageKind c, IsString d)
+   => BaseURL -> M.Entry Int b c -> d
 permalink base entry = fromString $ urlConcat base preferred
     where
         preferred = fromMaybe standard optional
@@ -286,24 +287,28 @@ urlConcat base xs = toString base ++ xs
 
 -- | Renders the RSS feed.
 renderFeed :: Local -> [M.RssEntry] -> String
-renderFeed w items = showXML $ rssToXML feed
+renderFeed w items = showTopElement $ xmlRSS feed
     where
         base = baseUrl w
-        feed = RSS
-                (toString $ siteTitle w)
-                (fromJust $ parseURI $ toString base)
-                "/dev/brain >> /dev/null"
-                []
-                (Prelude.map convert items)
-        convert i =
-            convertTitle (toString $ M.title i) ++
-            [ Guid False $ toString $ M.md5sig i
-            , PubDate $ M.timestamp i
-            , Link $ fromJust $ parseURI $ urlConcat base $ toString $ M.permalink i
-            , Description $ toString $ M.summary i
-            ]
-        convertTitle "" = []
-        convertTitle ti = [Title ti]
+        feed :: RSS
+        feed = RSS "2.0" [] channel []
+        channel :: RSSChannel
+        channel = (nullChannel (toString $ siteTitle w) (toString base))
+            {rssDescription = "/dev/brain >> /dev/null"
+            ,rssItems = Prelude.map convertItem items
+            }
+        convertItem :: M.RssEntry -> RSSItem
+        convertItem x = (nullItem "")
+            {rssItemTitle = toString <$> (emptyToNothing $ M.title x)
+            ,rssItemLink = Just $ urlConcat base $ toString $ M.permalink x
+            ,rssItemDescription = Just $ toString $ M.summary x
+            ,rssItemGuid = Just $ RSSGuid
+                {rssGuidPermanentURL = Just False
+                ,rssGuidAttrs = []
+                ,rssGuidValue = toString $ M.md5sig x
+                }
+            ,rssItemPubDate = Just $ toFeedDateStringUTC (RSSKind $ Just "2.0") $ M.timestamp x
+            }
 
 renderEntry :: RenderData M.SingleEntry -> Text
 renderEntry = renderHtml . layoutEntry
