@@ -1,20 +1,24 @@
 
 name: antiblog
 version: 0.1.0.1
--- synopsis:            
--- description:         
+synopsis: Antiblog website engine
+description: Antiblog website engine
 homepage: http://github.com/geekyfox/antiblog
 license: MIT
 license-file: LICENSE
 author: Ivan Appel
 maintainer: ivan.appel@gmail.com
--- copyright:           
+copyright: (C) Ivan Appel 2014-2016
 category: Web
 build-type: Simple
 cabal-version: >=1.10
 
 data-files:
     static/antiblog.css
+
+source-repository head
+    type: git
+    location: https://github.com/geekyfox/antiblog.git
 
 library
     hs-source-dirs: src
