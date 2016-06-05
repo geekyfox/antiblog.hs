@@ -7,8 +7,10 @@ import Control.Applicative
 #endif
 import Control.Monad.IO.Class
 import Data.String(IsString, fromString)
-import Data.Text hiding (maximum)
+import Data.Text(Text)
+import Numeric(showHex)
 import System.Console.Haskeline hiding (Handler)
+import System.Random(StdGen,newStdGen,randomRs)
 
 import Skulk.Deep
 import Skulk.Outcome
@@ -83,8 +85,11 @@ askRemoteConfig bundle = do
         <$> askRqStr "Remote URL"
         <*> askRqStr "API key"
 
+genHex :: StdGen -> String
+genHex = foldr showHex "" . randomRs (0, 15 :: Int)
+
 genApiKey :: IO String
-genApiKey = return "tbd"
+genApiKey = (take 32 . genHex) <$> newStdGen
 
 askApiKey :: OutcomeIO Text
 askApiKey = fromString <$> do
@@ -93,7 +98,7 @@ askApiKey = fromString <$> do
 
 askHttpPort :: [Local] -> OutcomeIO Int
 askHttpPort bundle = do
-    let suggest = maximum (8080:[ (httpPort x) + 1 | x <- bundle ])
+    let suggest = maximum (8080:[ httpPort x + 1 | x <- bundle ])
     askDefInt "HTTP port" suggest
 
 askAuthorDetails :: OutcomeIO (Bool, String, String)
