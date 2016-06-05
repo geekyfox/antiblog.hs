@@ -5,6 +5,7 @@ import Data.String
 import System.Console.CmdArgs.Explicit
 import Antiblog.Api
 import Antiblog.Config
+import Antiblog.ConfigMgt
 import Antiblog.Syncer
 
 type Task = Maybe SystemName -> Verbosity -> [String] -> IO ()
@@ -44,45 +45,76 @@ listFilesArg = Arg
 mkAction :: Task -> Action
 mkAction task = Action task Nothing Normal []
 
-mkMode :: Name -> Task -> Help -> Bool -> Bool -> Mode Action
-mkMode name task help hasFiles hasVerbosity = mode
+data Options = Options {
+    hasFiles :: Bool
+    ,hasVerbosity :: Bool
+    ,hasTarget :: Bool
+    }
+    
+emptyOpts :: Options
+emptyOpts = Options False False False
+
+fixedArgs :: Options -> [Arg Action]
+fixedArgs opts
+    | hasTarget opts = [targetArg]
+    | otherwise = []
+
+extraArgs :: Options -> Maybe (Arg Action)
+extraArgs opts
+    | hasFiles opts = Just listFilesArg
+    | otherwise = Nothing
+
+flags :: Options -> [Flag Action]
+flags opts
+    | hasVerbosity opts = [verboseFlag, veryVerboseFlag]
+    | otherwise = []
+
+mkMode :: Name -> Task -> Help -> Options -> Mode Action
+mkMode name task help opts = (modeEmpty $ mkAction task)
         {modeNames = [name]
         ,modeHelp = help
-        ,modeArgs = args
-        ,modeGroupFlags = toGroup flags
+        ,modeArgs = (fixedArgs opts, extraArgs opts)
+        ,modeGroupFlags = toGroup (flags opts)
         }
-    where
-        mode = modeEmpty (mkAction task)
-        args
-            | hasFiles = ([targetArg], Just listFilesArg)
-            | otherwise = ([targetArg], Nothing)
-        flags
-            | hasVerbosity = [verboseFlag, veryVerboseFlag]
-            | otherwise = []
+
+connect :: Maybe SystemName -> IO Client
+connect Nothing = error "System name is missing"
+connect (Just sys) = mkClient sys
 
 statusMode :: Mode Action
-statusMode = mkMode "status" go help False True
+statusMode = mkMode "status" go help opts
     where
-        go sys v _ = mkClient sys >>= status "." >>= showStatus v
+        go sys v _ = connect sys >>= status "." >>= showStatus v
         help = "Compare status of local files to remote server"
+        opts = emptyOpts { hasVerbosity = True, hasTarget = True }
 
 syncMode :: Mode Action
-syncMode = mkMode "sync" go help True True
+syncMode = mkMode "sync" go help opts
     where
-        go sys v fs = mkClient sys >>= sync v fs
+        go sys v fs = connect sys >>= sync v fs
         help = "Upload files to remote server"
+        opts = Options { hasFiles = True, hasVerbosity = True, hasTarget = True }
 
 pumpMode :: Mode Action
-pumpMode = mkMode "pump" go help True False
+pumpMode = mkMode "pump" go help opts
     where
-        go sys _ fs = mkClient sys >>= pump fs
+        go sys _ fs = connect sys >>= pump fs
         help = "Continuously pump files to server"
+        opts = emptyOpts { hasFiles = True, hasTarget = True }
 
 promoteMode :: Mode Action
-promoteMode = mkMode "promote" go help True False
+promoteMode = mkMode "promote" go help opts
     where
-        go sys _ fs = mkClient sys >>= promote fs
+        go sys _ fs = connect sys >>= promote fs
         help = "Schedule entries to appear on front page"
+        opts = emptyOpts { hasFiles = True, hasTarget = True }
+
+addRemoteMode :: Mode Action
+addRemoteMode = mkMode "add-remote" go help opts
+    where
+        go _ _ _ = addRemoteConfig
+        help = "Configure remote endpoint"
+        opts = emptyOpts
 
 helpAction :: Action
 helpAction = mkAction (\_ _ _ -> print compositeMode)
@@ -92,7 +124,7 @@ compositeMode = modes
     "antisync"
     helpAction
     "Command-line utility to synchronize antiblog posts"
-    [statusMode, syncMode, pumpMode, promoteMode]
+    [statusMode, syncMode, pumpMode, promoteMode, addRemoteMode]
 
 decideAction :: IO Action
 decideAction = processArgs compositeMode

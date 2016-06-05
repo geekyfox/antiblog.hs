@@ -299,10 +299,10 @@ renderFeed w items = showTopElement $ xmlRSS feed
             }
         convertItem :: M.RssEntry -> RSSItem
         convertItem x = (nullItem "")
-            {rssItemTitle = toString <$> (emptyToNothing $ M.title x)
+            {rssItemTitle = toString <$> emptyToNothing (M.title x)
             ,rssItemLink = Just $ urlConcat base $ toString $ M.permalink x
             ,rssItemDescription = Just $ toString $ M.summary x
-            ,rssItemGuid = Just $ RSSGuid
+            ,rssItemGuid = Just RSSGuid
                 {rssGuidPermanentURL = Just False
                 ,rssGuidAttrs = []
                 ,rssGuidValue = toString $ M.md5sig x

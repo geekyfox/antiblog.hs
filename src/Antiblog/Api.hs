@@ -87,9 +87,9 @@ instance (FromJSON a, FromJSON b, FromJSON c) => FromJSON (Entry a b c) where
 
 type Client = (Manager, Remote)
 
-mkClient :: Maybe SystemName -> IO Client
-mkClient name = do
-    cfg <- loadOrDie name
+mkClient :: SystemName -> IO Client
+mkClient sysName = do
+    cfg <- getClientConfigPath >>= loadOrDie sysName
     mgr <- newManager defaultManagerSettings
     return (mgr, cfg)
 

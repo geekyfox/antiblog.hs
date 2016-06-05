@@ -8,15 +8,16 @@ import System.IO
 import Web.Scotty
 
 import Antiblog.Config
+import Antiblog.Database
 import Antiblog.Routing
-import Common.Database
 
 -- | Entrypoint.
 main :: IO ()
 main = do
     hSetBuffering stdout NoBuffering
     args <- getArgs
-    when (length args /= 1) (error "Config file location is missing")
-    sys <- loadOrDie (Just $ SystemName $ head args)
-    db <- connect (dbConnString sys)
-    scotty (httpPort sys) $ routing db sys
+    when (length args /= 1) (error "System name is missing")
+    let sysName = SystemName (head args)
+    cfg <- getServerConfigPath >>= loadOrDie sysName
+    db <- mkConnPool cfg
+    scotty (httpPort cfg) $ routing db cfg

@@ -21,7 +21,7 @@ import Skulk.ToString
 
 import Antiblog.Api(ApiMessage(AM))
 import Antiblog.Config
-import Common.Database
+import Antiblog.Database
 import Common.Model
 
 import Antiblog.Layout hiding (title,summary)

@@ -3,9 +3,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
-module Common.Database (
+module Antiblog.Database (
     PoolT
-    ,connect
+    ,mkConnPool
     ,createEntry
     ,fetchEntry
     ,fetchEntryIndex
@@ -21,14 +21,13 @@ module Common.Database (
 
 import Control.Applicative
 import Control.Monad(when)
-import Data.ByteString.Char8(pack)
 import Data.Char(isNumber)
 import Data.List(sortBy)
 import Data.Maybe
 import Data.Ord(comparing)
 import Data.Pool(Pool, withResource, createPool)
 import Data.String(fromString)
-import Database.PostgreSQL.Simple hiding (connect)
+import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromField
 import Database.PostgreSQL.Simple.ToField
 import GHC.Int
@@ -37,6 +36,7 @@ import System.Random(randomRIO)
 import Skulk.Deep((<$$>))
 import Skulk.ToString
 
+import Antiblog.Config
 import Common.Model
 import Common.Schema(schema)
 
@@ -46,11 +46,19 @@ import Utils.Concierge(arrange)
 type PoolT = Pool Connection
 
 -- | Creates a connection pool with a given connstring.
-connect :: String -> IO PoolT
-connect cs = do
-    db <- createPool (connectPostgreSQL $ pack cs) close 1 30 10
-    withResource db (`arrange` schema)
-    return db
+mkConnPool :: Local -> IO PoolT
+mkConnPool cfg = do
+        db <- createPool (connect connInfo) close 1 30 10
+        withResource db (`arrange` schema)
+        return db
+    where
+        connInfo = ConnectInfo {
+            connectHost = dbHost cfg
+            ,connectPort = fromIntegral (dbPort cfg)
+            ,connectUser = dbUser cfg
+            ,connectPassword = dbPassword cfg
+            ,connectDatabase = dbDatabase cfg
+            }
 
 createEntry :: PoolT -> NewEntry -> IO Int
 createEntry p q = withResource p (`createEntryImpl` q)
